@@ -1,44 +1,58 @@
 import streamlit as st
 import pandas as pd
 import io
+import random
+import string
+import uuid
+from datetime import datetime
 
 # --- 页面配置 ---
-st.set_page_config(page_title="供应商比价系统", layout="wide") # 改为 wide 模式，利用屏幕宽度
+st.set_page_config(page_title="华脉询价系统", layout="wide")
 
-# --- CSS 样式优化 (解决间距太大的问题) ---
+# --- CSS 样式修复与优化 ---
+# 修复问题1：标题被遮挡。增加顶部内边距。
 st.markdown("""
     <style>
-        /* 缩小组件上下的空白 */
         .block-container {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
+            padding-top: 3.5rem; /* 增加顶部空间，防止标题被遮挡 */
+            padding-bottom: 2rem;
         }
-        /* 调整卡片内部的紧凑度 */
+        /* 卡片样式优化 */
         .st-emotion-cache-1r6slb0 {
-            padding: 1rem;
-        }
-        /* 调整标题大小 */
-        h4 {
-            margin-bottom: 0.5rem;
+            padding: 1.5rem;
+            border-radius: 10px;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 全局数据缓存 ---
+# --- 全局数据结构 (重构为支持多项目) ---
 @st.cache_resource
 def get_global_data():
     return {
-        '光纤连接器 Type-A': {'bids': []},
-        '路由器外壳 CNC': {'bids': []}
+        "projects": {} 
+        # 结构示例:
+        # "uuid_1": {
+        #     "name": "上午电子料询价",
+        #     "date": "2023-10-27",
+        #     "codes": {"GYSA": "8821", "GYSB": "9921", "GYSC": "0012"},
+        #     "products": { "连接器": {"bids": []} }
+        # }
     }
 
 shared_data = get_global_data()
 
-# --- 排名计算逻辑 ---
-def get_product_rankings(product_name):
-    if product_name not in shared_data:
+# --- 工具函数 ---
+def generate_random_code(length=6):
+    """生成随机数字密码"""
+    return ''.join(random.choices(string.digits, k=length))
+
+def get_product_rankings(project_id, product_name):
+    """计算特定项目中某个产品的排名"""
+    project = shared_data["projects"].get(project_id)
+    if not project or product_name not in project["products"]:
         return []
-    bids = shared_data[product_name]['bids']
+        
+    bids = project["products"][product_name]["bids"]
     if not bids:
         return []
     
@@ -51,89 +65,108 @@ def get_product_rankings(product_name):
 
     return sorted(supplier_best.values(), key=lambda x: x['price'])
 
-# --- 登录界面 ---
+# --- 登录逻辑 (升级版) ---
 def login_page():
-    st.markdown("## 🔐 供应商竞价系统")
-    with st.container(border=True):
-        username = st.text_input("账号")
-        password = st.text_input("密码", type="password")
-        if st.button("登录", use_container_width=True, type="primary"):
-            if username == "admin" and password == "admin888":
-                st.session_state.user_type = "admin"
-                st.session_state.user = username
-                st.rerun()
-            elif username in ["supA", "supB", "supC"] and password == "123":
-                st.session_state.user_type = "supplier"
-                st.session_state.user = username
-                st.rerun()
-            else:
-                st.error("账号或密码错误")
+    st.markdown("<h1 style='text-align: center;'>🔐 华脉询价系统登录</h1>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.container(border=True):
+            username = st.text_input("用户名")
+            password = st.text_input("密码 / 项目通行码", type="password")
+            
+            if st.button("登录", type="primary", use_container_width=True):
+                # 1. 甲方管理员登录
+                if username == "HUAMAI" and password == "HUAMAI888":
+                    st.session_state.user_type = "admin"
+                    st.session_state.user = username
+                    st.rerun()
+                
+                # 2. 供应商登录 (GYSA, GYSB, GYSC)
+                elif username in ["GYSA", "GYSB", "GYSC"]:
+                    # 遍历所有项目，检查密码是否匹配某个项目的通行码
+                    found_project = None
+                    for pid, p_data in shared_data["projects"].items():
+                        # 检查该项目是否给该供应商分配了密码，且密码匹配
+                        if p_data["codes"].get(username) == password:
+                            found_project = pid
+                            break
+                    
+                    if found_project:
+                        st.session_state.user_type = "supplier"
+                        st.session_state.user = username
+                        st.session_state.project_id = found_project # 锁定当前会话到该项目
+                        st.success("验证成功！正在进入报价室...")
+                        st.rerun()
+                    else:
+                        st.error("密码无效或项目已过期。请联系管理员获取最新通行码。")
+                else:
+                    st.error("用户不存在")
 
-# --- 供应商界面 (UI 紧凑化 + 隐藏价差) ---
+# --- 供应商界面 (只能看锁定的项目) ---
 def supplier_dashboard():
     current_user = st.session_state.user
-    
-    # --- 侧边栏：操作指南 ---
+    project_id = st.session_state.project_id
+    project = shared_data["projects"].get(project_id)
+
+    # 防御性检查：如果项目被删了
+    if not project:
+        st.error("该项目已结束或被删除。")
+        if st.button("退出"):
+            st.session_state.clear()
+            st.rerun()
+        return
+
+    # 侧边栏
     with st.sidebar:
         st.title(f"👤 {current_user}")
-        
-        st.info("📖 **操作必读**\n\n1. 在右侧输入价格并提交。\n2. **提交后，必须点击下方的【刷新排名】按钮**，才能看到你的最新名次！")
-        
-        # 使用 type="primary" 让按钮变红/显眼
-        if st.button("🔄 点我刷新排名", type="primary", use_container_width=True):
+        st.markdown(f"**当前项目**:\n{project['name']}")
+        st.markdown(f"**日期**: {project['date']}")
+        st.info("💡 **操作提示**\n提交报价后，请务必点击下方红色按钮刷新排名！")
+        if st.button("🔄 刷新排名", type="primary", use_container_width=True):
             st.rerun()
-            
-        st.markdown("---")
         if st.button("退出登录"):
             st.session_state.clear()
             st.rerun()
 
-    st.markdown("### 📊 实时报价列表")
-
-    if not shared_data:
-        st.warning("暂无询价产品")
+    # 主界面
+    st.markdown(f"### 📊 实时报价列表 - {project['name']}")
+    
+    products = project["products"]
+    if not products:
+        st.warning("该项目暂无询价产品。")
         return
 
-    # 使用 columns 布局，每行显示 1-2 个产品（取决于屏幕宽度），也可以一行一个但更紧凑
-    for product_name in list(shared_data.keys()):
-        # 给每个产品一个带边框的容器，视觉上更紧凑
+    for p_name in list(products.keys()):
         with st.container(border=True):
-            # 第一行：标题
-            st.markdown(f"#### 📦 {product_name}")
+            st.markdown(f"#### 📦 {p_name}")
+            rankings = get_product_rankings(project_id, p_name)
             
-            rankings = get_product_rankings(product_name)
+            # 计算排名
             min_price = rankings[0]['price'] if rankings else 0
-            
             my_rank = None
             for idx, rank_info in enumerate(rankings):
                 if rank_info['supplier'] == current_user:
                     my_rank = idx + 1
                     break
             
-            # 第二行：数据和操作 (分为3列)
             c1, c2, c3 = st.columns([1, 1, 1.5])
-            
-            # 列1：最低价
             c1.metric("全场最低价", f"¥{min_price}" if min_price else "--")
             
-            # 列2：我的排名 (修改点：隐藏具体落后价格)
             if my_rank == 1:
-                c2.metric("我的排名", "第 1 名 🏆", delta="当前领先")
+                c2.metric("我的排名", "第 1 名 🏆", delta="领先")
             elif my_rank:
-                # 只显示第几名，delta 设为 None 或 "未领先"，不显示具体差价
                 c2.metric("我的排名", f"第 {my_rank} 名", delta=None, delta_color="off")
             else:
                 c2.metric("我的排名", "未报价")
 
-            # 列3：报价输入框 (高度对齐优化)
             with c3:
-                with st.form(key=f"f_{product_name}", border=False):
-                    # 把输入框和按钮放在一行
-                    sub_c1, sub_c2 = st.columns([2, 1])
-                    new_price = sub_c1.number_input("报价", min_value=0.0, step=1.0, label_visibility="collapsed", placeholder="输入价格")
-                    if sub_c2.form_submit_button("🚀 提交"):
+                with st.form(key=f"{project_id}_{p_name}", border=False):
+                    sc1, sc2 = st.columns([2, 1])
+                    new_price = sc1.number_input("报价", min_value=0.0, step=1.0, label_visibility="collapsed")
+                    if sc2.form_submit_button("🚀 提交"):
                         if new_price > 0:
-                            shared_data[product_name]['bids'].append({
+                            products[p_name]['bids'].append({
                                 'supplier': current_user,
                                 'price': new_price,
                                 'time': pd.Timestamp.now().strftime('%H:%M:%S')
@@ -141,63 +174,139 @@ def supplier_dashboard():
                             st.success("已提交")
                             st.rerun()
 
-# --- 管理员界面 (保持紧凑) ---
+# --- 管理员界面 (多项目管理) ---
 def admin_dashboard():
-    st.sidebar.title("👮‍♂️ 管理员")
-    if st.sidebar.button("🔄 刷新数据", type="primary"): st.rerun()
-    if st.sidebar.button("退出"): 
+    st.sidebar.title("👮‍♂️ 华脉总控台")
+    st.sidebar.markdown(f"用户: {st.session_state.user}")
+    
+    # 侧边栏功能切换
+    menu = st.sidebar.radio("功能导航", ["📁 项目管理 (新建/密码)", "📊 实时监控", "⚙️ 全局设置"])
+    
+    if st.sidebar.button("退出系统"):
         st.session_state.clear()
         st.rerun()
 
-    st.title("📋 甲方总控台")
-    
-    tab1, tab2, tab3 = st.tabs(["🏆 实时排名", "⚙️ 产品管理", "📝 历史记录"])
-
-    with tab1:
-        for p_name in shared_data.keys():
-            with st.container(border=True):
-                st.markdown(f"#### {p_name}")
-                rankings = get_product_rankings(p_name)
-                if rankings:
-                    # 简化表格显示
-                    st.dataframe(
-                        pd.DataFrame(rankings)[['supplier', 'price', 'time']].rename(columns={'supplier':'供应商', 'price':'报价', 'time':'时间'}),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                else:
-                    st.caption("暂无报价")
-
-    with tab2:
-        with st.form("add"):
-            c1, c2 = st.columns([3, 1])
-            new_name = c1.text_input("产品名称", label_visibility="collapsed", placeholder="输入新产品名称")
-            if c2.form_submit_button("➕ 发布产品"):
-                if new_name and new_name not in shared_data:
-                    shared_data[new_name] = {'bids': []}
-                    st.rerun()
+    # === 功能1：项目管理 (核心) ===
+    if menu == "📁 项目管理 (新建/密码)":
+        st.title("📁 项目管理中心")
+        
+        # 1. 新建项目
+        with st.expander("➕ 创建新询价项目", expanded=True):
+            with st.form("new_project"):
+                c1, c2 = st.columns([2, 1])
+                p_name = c1.text_input("项目名称 (如：10月27日电子料询价)")
+                p_date = c2.date_input("询价日期", datetime.now())
+                if st.form_submit_button("立即创建"):
+                    if p_name:
+                        new_id = str(uuid.uuid4())[:8] # 生成简短ID
+                        # 随机生成3个不同的密码
+                        codes = {
+                            "GYSA": generate_random_code(),
+                            "GYSB": generate_random_code(),
+                            "GYSC": generate_random_code()
+                        }
+                        shared_data["projects"][new_id] = {
+                            "name": p_name,
+                            "date": str(p_date),
+                            "codes": codes,
+                            "products": {}
+                        }
+                        st.success(f"项目 '{p_name}' 创建成功！")
+                        st.rerun()
         
         st.markdown("---")
-        for p_name in list(shared_data.keys()):
-            c1, c2 = st.columns([4, 1])
-            c1.text(p_name)
-            if c2.button("删除", key=f"d_{p_name}"):
-                del shared_data[p_name]
-                st.rerun()
-
-    with tab3:
-        all_records = []
-        for pname, info in shared_data.items():
-            for bid in info['bids']:
-                all_records.append({'产品': pname, '供应商': bid['supplier'], '价格': bid['price'], '时间': bid['time']})
         
-        if all_records:
-            df = pd.DataFrame(all_records)
-            st.dataframe(df, use_container_width=True)
+        # 2. 项目列表 (按日期折叠)
+        if not shared_data["projects"]:
+            st.info("暂无项目，请先创建。")
         else:
-            st.info("暂无数据")
+            # 按日期分组显示
+            projects_by_date = {}
+            for pid, data in shared_data["projects"].items():
+                d = data["date"]
+                if d not in projects_by_date: projects_by_date[d] = []
+                projects_by_date[d].append((pid, data))
+            
+            # 倒序显示日期
+            for d in sorted(projects_by_date.keys(), reverse=True):
+                with st.expander(f"📅 {d}", expanded=True):
+                    for pid, data in projects_by_date[d]:
+                        with st.container(border=True):
+                            # 项目标题栏
+                            col_title, col_action = st.columns([3, 1])
+                            col_title.subheader(f"📂 {data['name']}")
+                            if col_action.button("🗑️ 删除项目", key=f"del_{pid}"):
+                                del shared_data["projects"][pid]
+                                st.rerun()
+                            
+                            # 密码区 (重点)
+                            st.markdown("##### 🔑 供应商通行码 (请复制发给对应供应商)")
+                            code_cols = st.columns(3)
+                            for idx, (sup, code) in enumerate(data["codes"].items()):
+                                code_cols[idx].code(f"{sup}: {code}", language="text")
+                            
+                            # 产品管理区
+                            st.markdown("##### 📦 询价产品")
+                            # 显示现有产品
+                            if data["products"]:
+                                tags = [f"{p} ({len(v['bids'])}报价)" for p, v in data["products"].items()]
+                                st.write("已包含: " + " | ".join(tags))
+                            
+                            # 添加新产品
+                            c_add1, c_add2 = st.columns([3, 1])
+                            new_prod = c_add1.text_input("添加产品", key=f"add_p_name_{pid}", placeholder="输入产品名称", label_visibility="collapsed")
+                            if c_add2.button("➕ 添加", key=f"btn_add_{pid}"):
+                                if new_prod and new_prod not in data["products"]:
+                                    data["products"][new_prod] = {"bids": []}
+                                    st.rerun()
 
-# --- 主程序 ---
+    # === 功能2：实时监控 ===
+    elif menu == "📊 实时监控":
+        st.title("📊 报价监控")
+        if not shared_data["projects"]:
+            st.warning("暂无项目")
+        else:
+            # 选择要查看的项目
+            project_options = {pid: f"{d['date']} - {d['name']}" for pid, d in shared_data["projects"].items()}
+            selected_pid = st.selectbox("选择项目", options=list(project_options.keys()), format_func=lambda x: project_options[x])
+            
+            project = shared_data["projects"][selected_pid]
+            
+            st.markdown(f"### {project['name']}")
+            
+            # 下载该项目的Excel
+            all_records = []
+            for pname, info in project["products"].items():
+                for bid in info['bids']:
+                    all_records.append({'产品': pname, '供应商': bid['supplier'], '价格': bid['price'], '时间': bid['time']})
+            
+            if all_records:
+                df = pd.DataFrame(all_records)
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False)
+                st.download_button("📥 导出该项目报价单", buffer.getvalue(), f"bids_{project['date']}.xlsx")
+            
+            # 显示排名表格
+            for p_name in project["products"].keys():
+                with st.container(border=True):
+                    st.markdown(f"**{p_name}**")
+                    rankings = get_product_rankings(selected_pid, p_name)
+                    if rankings:
+                        # 整理表格
+                        display_data = []
+                        for i, r in enumerate(rankings):
+                            display_data.append({
+                                "排名": f"第 {i+1} 名 {'🥇' if i==0 else ''}", 
+                                "供应商": r['supplier'], 
+                                "价格": f"¥{r['price']}",
+                                "时间": r['time']
+                            })
+                        st.table(display_data)
+                    else:
+                        st.caption("暂无报价")
+
+# --- 主程序路由 ---
 if 'user' not in st.session_state:
     login_page()
 else:
