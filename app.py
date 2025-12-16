@@ -3,34 +3,45 @@ import pandas as pd
 import io
 
 # --- 页面配置 ---
-st.set_page_config(page_title="供应商比价系统", layout="centered")
+st.set_page_config(page_title="供应商比价系统", layout="wide") # 改为 wide 模式，利用屏幕宽度
 
-# ==========================================
-# 核心修改：使用 @st.cache_resource 实现全局共享
-# 这样所有人看到的都是同一份数据！
-# ==========================================
+# --- CSS 样式优化 (解决间距太大的问题) ---
+st.markdown("""
+    <style>
+        /* 缩小组件上下的空白 */
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+        }
+        /* 调整卡片内部的紧凑度 */
+        .st-emotion-cache-1r6slb0 {
+            padding: 1rem;
+        }
+        /* 调整标题大小 */
+        h4 {
+            margin-bottom: 0.5rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 全局数据缓存 ---
 @st.cache_resource
 def get_global_data():
-    # 返回一个字典，充当全局数据库
     return {
-        # 预设几个产品，避免空空如也
         '光纤连接器 Type-A': {'bids': []},
         '路由器外壳 CNC': {'bids': []}
     }
 
-# 获取全局数据对象 (注意：这里不用 session_state 了)
 shared_data = get_global_data()
 
-# --- 辅助功能：计算排名 ---
+# --- 排名计算逻辑 ---
 def get_product_rankings(product_name):
     if product_name not in shared_data:
         return []
-        
     bids = shared_data[product_name]['bids']
     if not bids:
         return []
     
-    # 逻辑：每个供应商取最低价
     supplier_best = {}
     for bid in bids:
         sup = bid['supplier']
@@ -38,19 +49,15 @@ def get_product_rankings(product_name):
         if sup not in supplier_best or price < supplier_best[sup]['price']:
             supplier_best[sup] = bid
 
-    # 排序：价格从低到高
-    ranked_list = sorted(supplier_best.values(), key=lambda x: x['price'])
-    return ranked_list
+    return sorted(supplier_best.values(), key=lambda x: x['price'])
 
-# --- 登录逻辑 (保持不变) ---
+# --- 登录界面 ---
 def login_page():
-    st.title("🔐 供应商竞价系统登录")
-    with st.form("login_form"):
+    st.markdown("## 🔐 供应商竞价系统")
+    with st.container(border=True):
         username = st.text_input("账号")
         password = st.text_input("密码", type="password")
-        submitted = st.form_submit_button("登录")
-        
-        if submitted:
+        if st.button("登录", use_container_width=True, type="primary"):
             if username == "admin" and password == "admin888":
                 st.session_state.user_type = "admin"
                 st.session_state.user = username
@@ -60,79 +67,85 @@ def login_page():
                 st.session_state.user = username
                 st.rerun()
             else:
-                st.error("账号或密码错误！")
+                st.error("账号或密码错误")
 
-# --- 供应商界面 (读取 shared_data) ---
+# --- 供应商界面 (UI 紧凑化 + 隐藏价差) ---
 def supplier_dashboard():
     current_user = st.session_state.user
-    st.sidebar.title(f"👤 供应商: {current_user}")
     
-    # 强制刷新按钮 (因为是全局数据，有时需要手动刷新看最新状态)
-    if st.sidebar.button("🔄 刷新最新排名"):
-        st.rerun()
+    # --- 侧边栏：操作指南 ---
+    with st.sidebar:
+        st.title(f"👤 {current_user}")
         
-    if st.sidebar.button("退出登录"):
-        st.session_state.clear()
-        st.rerun()
+        st.info("📖 **操作必读**\n\n1. 在右侧输入价格并提交。\n2. **提交后，必须点击下方的【刷新排名】按钮**，才能看到你的最新名次！")
+        
+        # 使用 type="primary" 让按钮变红/显眼
+        if st.button("🔄 点我刷新排名", type="primary", use_container_width=True):
+            st.rerun()
+            
+        st.markdown("---")
+        if st.button("退出登录"):
+            st.session_state.clear()
+            st.rerun()
 
-    st.title("📊 实时报价大厅")
+    st.markdown("### 📊 实时报价列表")
 
     if not shared_data:
-        st.info("👋 甲方暂未发布任何询价产品。")
+        st.warning("暂无询价产品")
         return
 
-    for product_name in list(shared_data.keys()): # 使用 list() 避免遍历时修改报错
-        info = shared_data[product_name]
-        with st.container():
-            st.markdown(f"### 📦 {product_name}")
+    # 使用 columns 布局，每行显示 1-2 个产品（取决于屏幕宽度），也可以一行一个但更紧凑
+    for product_name in list(shared_data.keys()):
+        # 给每个产品一个带边框的容器，视觉上更紧凑
+        with st.container(border=True):
+            # 第一行：标题
+            st.markdown(f"#### 📦 {product_name}")
             
             rankings = get_product_rankings(product_name)
             min_price = rankings[0]['price'] if rankings else 0
             
-            # 计算我的排名
             my_rank = None
-            my_best_price = None
-            
             for idx, rank_info in enumerate(rankings):
                 if rank_info['supplier'] == current_user:
                     my_rank = idx + 1
-                    my_best_price = rank_info['price']
                     break
             
-            # 显示数据
-            col1, col2, col3 = st.columns([1, 1, 2])
-            col1.metric("全场最低价", f"¥{min_price}" if min_price else "--")
+            # 第二行：数据和操作 (分为3列)
+            c1, c2, c3 = st.columns([1, 1, 1.5])
             
+            # 列1：最低价
+            c1.metric("全场最低价", f"¥{min_price}" if min_price else "--")
+            
+            # 列2：我的排名 (修改点：隐藏具体落后价格)
             if my_rank == 1:
-                col2.metric("我的排名", "第 1 名 🏆", delta="当前领先", delta_color="normal")
+                c2.metric("我的排名", "第 1 名 🏆", delta="当前领先")
             elif my_rank:
-                diff = my_best_price - min_price
-                col2.metric("我的排名", f"第 {my_rank} 名", delta=f"落后 ¥{diff:.2f}", delta_color="inverse")
+                # 只显示第几名，delta 设为 None 或 "未领先"，不显示具体差价
+                c2.metric("我的排名", f"第 {my_rank} 名", delta=None, delta_color="off")
             else:
-                col2.metric("我的排名", "未报价")
+                c2.metric("我的排名", "未报价")
 
-            # 报价表单
-            with col3:
-                with st.form(key=f"form_{product_name}"):
-                    new_price = st.number_input("输入报价", min_value=0.0, step=1.0, label_visibility="collapsed")
-                    if st.form_submit_button("🚀 提交报价"):
+            # 列3：报价输入框 (高度对齐优化)
+            with c3:
+                with st.form(key=f"f_{product_name}", border=False):
+                    # 把输入框和按钮放在一行
+                    sub_c1, sub_c2 = st.columns([2, 1])
+                    new_price = sub_c1.number_input("报价", min_value=0.0, step=1.0, label_visibility="collapsed", placeholder="输入价格")
+                    if sub_c2.form_submit_button("🚀 提交"):
                         if new_price > 0:
-                            # --- 关键修改：写入全局 shared_data ---
                             shared_data[product_name]['bids'].append({
                                 'supplier': current_user,
                                 'price': new_price,
                                 'time': pd.Timestamp.now().strftime('%H:%M:%S')
                             })
-                            st.success("报价成功！")
+                            st.success("已提交")
                             st.rerun()
-            st.divider()
 
-# --- 管理员界面 (读取 shared_data) ---
+# --- 管理员界面 (保持紧凑) ---
 def admin_dashboard():
-    st.sidebar.title("👮‍♂️ 管理员模式")
-    if st.sidebar.button("🔄 刷新数据"):
-        st.rerun()
-    if st.sidebar.button("退出登录"):
+    st.sidebar.title("👮‍♂️ 管理员")
+    if st.sidebar.button("🔄 刷新数据", type="primary"): st.rerun()
+    if st.sidebar.button("退出"): 
         st.session_state.clear()
         st.rerun()
 
@@ -140,40 +153,38 @@ def admin_dashboard():
     
     tab1, tab2, tab3 = st.tabs(["🏆 实时排名", "⚙️ 产品管理", "📝 历史记录"])
 
-    # Tab 1: 排名
     with tab1:
-        if not shared_data:
-            st.info("暂无产品。")
         for p_name in shared_data.keys():
-            st.subheader(f"📦 {p_name}")
-            rankings = get_product_rankings(p_name)
-            if rankings:
-                rank_data = [{"排名": f"第 {i+1} 名", "供应商": r['supplier'], "价格": r['price'], "时间": r['time']} for i, r in enumerate(rankings)]
-                st.table(rank_data)
-            else:
-                st.caption("等待报价...")
-            st.divider()
+            with st.container(border=True):
+                st.markdown(f"#### {p_name}")
+                rankings = get_product_rankings(p_name)
+                if rankings:
+                    # 简化表格显示
+                    st.dataframe(
+                        pd.DataFrame(rankings)[['supplier', 'price', 'time']].rename(columns={'supplier':'供应商', 'price':'报价', 'time':'时间'}),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                else:
+                    st.caption("暂无报价")
 
-    # Tab 2: 管理
     with tab2:
-        st.header("发布/删除产品")
-        with st.form("add_product"):
-            new_name = st.text_input("新产品名称")
-            if st.form_submit_button("➕ 发布"):
+        with st.form("add"):
+            c1, c2 = st.columns([3, 1])
+            new_name = c1.text_input("产品名称", label_visibility="collapsed", placeholder="输入新产品名称")
+            if c2.form_submit_button("➕ 发布产品"):
                 if new_name and new_name not in shared_data:
                     shared_data[new_name] = {'bids': []}
-                    st.success(f"已发布: {new_name}")
                     st.rerun()
         
-        st.divider()
+        st.markdown("---")
         for p_name in list(shared_data.keys()):
             c1, c2 = st.columns([4, 1])
-            c1.markdown(f"**{p_name}**")
-            if c2.button("🗑️ 删除", key=f"del_{p_name}"):
+            c1.text(p_name)
+            if c2.button("删除", key=f"d_{p_name}"):
                 del shared_data[p_name]
                 st.rerun()
 
-    # Tab 3: 导出
     with tab3:
         all_records = []
         for pname, info in shared_data.items():
@@ -183,12 +194,8 @@ def admin_dashboard():
         if all_records:
             df = pd.DataFrame(all_records)
             st.dataframe(df, use_container_width=True)
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False)
-            st.download_button("📥 导出Excel", buffer.getvalue(), "bids.xlsx")
         else:
-            st.warning("暂无数据")
+            st.info("暂无数据")
 
 # --- 主程序 ---
 if 'user' not in st.session_state:
