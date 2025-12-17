@@ -13,22 +13,15 @@ st.set_page_config(page_title="华脉招采平台", layout="wide")
 # --- 🎨 CSS 样式深度定制 ---
 st.markdown("""
     <style>
-        /* 1. 修复标题遮挡：加大顶部间距 */
         .block-container {
             padding-top: 5rem !important;
             padding-bottom: 2rem !important;
             padding-left: 1rem !important;
             padding-right: 1rem !important;
         }
-        
-        /* 2. 组件间距优化 */
         div[data-testid="stVerticalBlock"] > div { gap: 0.5rem !important; }
-        
-        /* 3. 代码块样式 (复制框) */
         .stCode { font-size: 0.9em !important; margin-bottom: 0px !important; }
         div[data-testid="stCodeBlock"] > pre { padding: 0.4rem !important; border-radius: 4px !important; }
-
-        /* 4. 文件上传框汉化与美化 */
         section[data-testid="stFileUploader"] { padding: 0px !important; min-height: 0px !important; }
         section[data-testid="stFileUploader"] > div { padding-top: 5px !important; padding-bottom: 5px !important; }
         section[data-testid="stFileUploader"] small { display: none; }
@@ -46,15 +39,11 @@ st.markdown("""
             font-size: 13px; color: #888; pointer-events: none; z-index: 1;
         }
         section[data-testid="stFileUploader"] > div { justify-content: flex-end; }
-
-        /* 5. 其他样式 */
         .compact-card { border: 1px solid #eee; background-color: #fcfcfc; padding: 10px; border-radius: 6px; margin-bottom: 5px; }
         .stDataFrame { font-size: 0.85rem; }
         .prod-desc { font-size: 0.85em; color: #666; margin-left: 5px; font-style: italic;}
         .sup-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; background-color: #e6f3ff; color: #0068c9; border: 1px solid #cce5ff; font-size: 0.85rem; margin-right: 5px; margin-bottom: 5px; }
         .sup-info { font-size: 0.8em; color: #666; margin-left: 10px; }
-        
-        /* 附件胶囊 */
         .file-tag {
             display: inline-block; background-color: #f0f2f6; color: #31333F;
             padding: 4px 10px; border-radius: 15px; border: 1px solid #dce0e6;
@@ -78,7 +67,7 @@ def get_global_data():
     }
 shared_data = get_global_data()
 
-# 数据结构自检 (防止旧数据报错)
+# 数据结构自检
 if isinstance(shared_data.get("suppliers"), list):
     old_list = shared_data["suppliers"]
     shared_data["suppliers"] = {name: {"contact": "", "phone": "", "job": "", "type": "", "address": ""} for name in old_list}
@@ -161,10 +150,8 @@ def supplier_dashboard():
 
     for pname, pinfo in products.items():
         with st.container():
-            # 显示描述
             desc_text = pinfo.get('desc', '')
             desc_html = f"<span class='prod-desc'>({desc_text})</span>" if desc_text else ""
-            
             st.markdown(f"""
             <div class="compact-card" style="display:flex; justify-content:space-between; align-items:center;">
                 <span><b>📦 {pname}</b> {desc_html}</span>
@@ -207,7 +194,7 @@ def supplier_dashboard():
 
 # --- 管理员界面 ---
 def admin_dashboard():
-    # 🔥 核心修复：申明全局变量，解决 UnboundLocalError
+    # 🔥🔥🔥 1. 核心修复：这里必须申明全局变量，否则会报 UnboundLocalError 🔥🔥🔥
     global shared_data
     
     st.sidebar.title("👮‍♂️ 总控")
@@ -320,7 +307,7 @@ def admin_dashboard():
                                 else: st.warning("已存在")
                             else: st.warning("无效操作")
 
-                # 2. 供应商管理 (修复布局问题 + 增加删除功能)
+                # 2. 供应商管理 (修复了之前挤在一起的问题，现在用4列布局)
                 st.caption("🔑 供应商管理 (含移除功能)")
                 if p['codes']:
                     # 表头
@@ -332,11 +319,10 @@ def admin_dashboard():
                     </div>""", unsafe_allow_html=True)
                     
                     for sup, code in list(p['codes'].items()):
-                        # 使用 4 列布局解决挤压问题
                         c1, c2, c3, c4 = st.columns([1.5, 2, 2, 0.8])
                         with c1: st.markdown(f"**{sup}**")
-                        with c2: st.code(sup, language=None) # 用户名可复制
-                        with c3: st.code(code, language=None) # 密码可复制
+                        with c2: st.code(sup, language=None)
+                        with c3: st.code(code, language=None)
                         with c4:
                             if st.button("🗑️", key=f"rm_{pid}_{sup}", help="移除该供应商"):
                                 del p['codes'][sup]
@@ -354,7 +340,7 @@ def admin_dashboard():
                     if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
                         del p['products'][k]; st.rerun()
                 
-                # 添加产品表单 (修复 SyntaxError)
+                # 添加产品表单
                 with st.form(f"add_{pid}", border=False):
                     ac1, ac2, ac3, ac4, ac5 = st.columns([2, 1, 2, 2, 1])
                     pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
@@ -367,7 +353,6 @@ def admin_dashboard():
                             st.rerun()
                 if st.button("🗑️ 删除该项目", key=f"del_{pid}"): del shared_data["projects"][pid]; st.rerun()
 
-    # === 监控中心 ===
     elif menu == "监控中心":
         st.subheader("📊 监控中心")
         opts = {k: f"{v['deadline']} - {v['name']}" for k, v in shared_data["projects"].items() if 'deadline' in v}
