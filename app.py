@@ -11,7 +11,7 @@ import hashlib
 # --- 页面配置 ---
 st.set_page_config(page_title="华脉招采平台", layout="wide", page_icon="🏢")
 
-# --- 🎨 CSS 样式深度定制 (V2.1 修复字体显示问题) ---
+# --- 🎨 CSS 样式深度定制 (V2.2 包含字体修复+新功能适配) ---
 st.markdown("""
     <style>
         /* 1. 全局布局紧凑化 */
@@ -28,11 +28,10 @@ st.markdown("""
         
         /* ⭐️ 核心修复：标题显示不全的问题 */
         h1, h2, h3, h4 {
-            line-height: 1.6 !important; /* 增加行高，防止切头去尾 */
-            padding-top: 10px !important; /* 顶部留出空间 */
-            padding-bottom: 10px !important; /* 底部留出空间 */
-            font-family: "Source Sans Pro", "Microsoft YaHei", "微软雅黑", sans-serif !important; /* 强制使用中文友好字体 */
-            overflow: visible !important; /* 确保内容不被裁剪 */
+            line-height: 1.6 !important;
+            padding-top: 10px !important;
+            padding-bottom: 10px !important;
+            font-family: "Source Sans Pro", "Microsoft YaHei", "微软雅黑", sans-serif !important;
         }
         
         /* 3. 卡片式容器 - 核心UI组件 */
@@ -74,8 +73,8 @@ st.markdown("""
         /* 7. 自定义标签与徽章 */
         .file-tag {
             display: inline-block; background-color: #e3f2fd; color: #0d47a1;
-            padding: 2px 10px; border-radius: 12px; border: 1px solid #bbdefb;
-            text-decoration: none; font-size: 0.8rem; margin-right: 5px;
+            padding: 2px 8px; border-radius: 4px; border: 1px solid #bbdefb;
+            text-decoration: none; font-size: 12px; margin-right: 5px; cursor: pointer;
         }
         .file-tag:hover { background-color: #bbdefb; }
         
@@ -123,9 +122,9 @@ def file_to_base64(uploaded_file, max_size=200*1024*1024):
         st.error(f"文件处理失败：{str(e)}")
         return None
 
-def get_styled_download_tag(file_dict, supplier_name=""):
+def get_styled_download_tag(file_dict, label_prefix=""):
     if not isinstance(file_dict, dict) or not file_dict.get('data'): return ""
-    display_label = f"📎 {supplier_name} - {file_dict['name']}" if supplier_name else f"📎 {file_dict['name']}"
+    display_label = f"📎 {label_prefix} {file_dict['name']}" if label_prefix else f"📎 {file_dict['name']}"
     return f'<a href="data:{file_dict["type"]};base64,{file_dict["data"]}" download="{file_dict["name"]}" class="file-tag" target="_blank">{display_label}</a>'
 
 def safe_parse_deadline(deadline_str):
@@ -202,9 +201,13 @@ def render_supplier_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    col_l, col_r = st.columns([6, 1])
+    # 按钮栏（新增刷新按钮）
+    col_l, col_m, col_r = st.columns([5, 1, 1])
+    with col_m:
+        if st.button("🔄 刷新", use_container_width=True, help="刷新页面获取最新状态"):
+            st.rerun()
     with col_r:
-        if st.button("退出登录", use_container_width=True):
+        if st.button("退出", use_container_width=True):
             st.session_state.clear(); st.rerun()
 
     # 产品列表
@@ -310,14 +313,13 @@ def render_admin_dashboard():
             for pid, pdata in sorted_projs:
                 with st.expander(f"📅 {pdata['deadline']} | {pdata['name']}", expanded=False):
                     
-                    # 1. 供应商账号管理（修复：使用 st.code 实现复制，优化布局）
+                    # 1. 供应商账号管理
                     st.markdown("#### 🔑 供应商授权与密码")
                     st.info("💡 鼠标悬停在账号或密码上，点击右上角图标即可复制")
                     
                     codes = pdata.get("codes", {})
                     if codes:
                         st.markdown('<div class="ui-card">', unsafe_allow_html=True)
-                        # 表头
                         h1, h2, h3, h4 = st.columns([1.5, 2, 2, 1])
                         h1.markdown("**供应商**"); h2.markdown("**登录账号**"); h3.markdown("**登录密码**"); h4.markdown("**操作**")
                         st.markdown("<hr style='margin:5px 0'>", unsafe_allow_html=True)
@@ -331,14 +333,12 @@ def render_admin_dashboard():
                                 if st.button("移除", key=f"rm_{pid}_{s_name}"):
                                     del pdata["codes"][s_name]; st.rerun()
                         
-                        # 追加供应商逻辑
                         st.markdown("<hr style='margin:10px 0'>", unsafe_allow_html=True)
                         ac1, ac2 = st.columns([3, 1])
                         new_sup_name = ac1.text_input("追加新供应商(输入名称)", key=f"add_sup_in_{pid}", label_visibility="collapsed", placeholder="输入名称自动生成账号")
                         if ac2.button("追加", key=f"btn_add_{pid}"):
                             if new_sup_name and new_sup_name not in codes:
                                 pdata["codes"][new_sup_name] = generate_random_code()
-                                # 同步到库
                                 if new_sup_name not in global_data["suppliers"]:
                                     global_data["suppliers"][new_sup_name] = {}
                                 st.rerun()
@@ -347,7 +347,6 @@ def render_admin_dashboard():
                     # 2. 产品管理
                     st.markdown("#### 📦 询价产品列表")
                     prods = pdata.get("products", {})
-                    # 添加产品
                     with st.form(f"add_p_{pid}", border=True):
                         c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
                         pn = c1.text_input("产品名")
@@ -358,7 +357,6 @@ def render_admin_dashboard():
                             pdata["products"][pn] = {"quantity": pq, "desc": pd_, "bids": []}
                             st.rerun()
                     
-                    # 显示产品
                     if prods:
                         st.markdown('<div class="ui-card">', unsafe_allow_html=True)
                         for pdn, pdi in prods.items():
@@ -375,12 +373,10 @@ def render_admin_dashboard():
     elif menu == "供应商库":
         st.subheader("🏢 供应商数据库")
         
-        # 使用 data_editor 实现 Excel 般的操作体验
         df = pd.DataFrame.from_dict(global_data["suppliers"], orient='index')
         if df.empty:
             df = pd.DataFrame(columns=["contact", "phone", "job", "type", "address"])
         
-        # 列名美化
         df.columns = ["联系人", "电话", "职位", "产品类型", "地址"]
         
         with st.container():
@@ -388,7 +384,6 @@ def render_admin_dashboard():
             edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="sup_editor")
             
             if st.button("💾 保存更改", type="primary"):
-                # 将DataFrame转回字典格式
                 new_dict = {}
                 for idx, row in edited_df.iterrows():
                     new_dict[idx] = {
@@ -432,14 +427,39 @@ def render_admin_dashboard():
             st.markdown('</div>', unsafe_allow_html=True)
             
             # 详细对比图表
-            st.markdown("#### 📈 报价明细")
+            st.markdown("#### 📈 报价明细与附件")
             for pn, pinfo in products.items():
                 bids = pinfo.get("bids", [])
                 if bids:
-                    st.markdown(f"**{pn}**")
+                    st.markdown(f"**📦 {pn}**")
+                    
+                    # 1. 图表
                     chart_data = pd.DataFrame(bids)
-                    # 图表：供应商 vs 价格
                     st.bar_chart(chart_data, x="supplier", y="price", color="#3b82f6")
+                    
+                    # 2. 详细数据表（含附件下载）
+                    st.markdown("<small style='color:#666'>详细报价列表：</small>", unsafe_allow_html=True)
+                    # 表头
+                    cols = st.columns([2, 2, 3, 2, 2])
+                    cols[0].markdown("**供应商**")
+                    cols[1].markdown("**单价**")
+                    cols[2].markdown("**备注**")
+                    cols[3].markdown("**报价时间**")
+                    cols[4].markdown("**附件下载**")
+                    st.divider()
+                    
+                    for bid in bids:
+                        c1, c2, c3, c4, c5 = st.columns([2, 2, 3, 2, 2])
+                        c1.caption(bid["supplier"])
+                        c2.caption(f"¥{bid['price']}")
+                        c3.caption(bid.get("remark", "-"))
+                        c4.caption(bid.get("time", "-"))
+                        with c5:
+                            if bid.get("file"):
+                                st.markdown(get_styled_download_tag(bid["file"]), unsafe_allow_html=True)
+                            else:
+                                st.caption("无")
+                    st.markdown("<br>", unsafe_allow_html=True)
 
 # --- 主程序入口 ---
 def main():
