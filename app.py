@@ -117,7 +117,7 @@ def login_page():
                             st.rerun(); found = True; break
                     if not found: st.error("验证失败")
 
-# --- 供应商界面 (增加防重复提交逻辑) ---
+# --- 供应商界面 ---
 def supplier_dashboard():
     user = st.session_state.user
     pid = st.session_state.project_id
@@ -161,37 +161,27 @@ def supplier_dashboard():
                 with fc3: sup_file = st.file_uploader("附件", type=['pdf','jpg','xlsx'], label_visibility="collapsed", key=f"u_{pname}")
                 with fc4: 
                     submitted = st.form_submit_button("提交", use_container_width=True)
-                    
                     if submitted:
                         if not closed:
                             if price > 0:
-                                # 1. 处理文件数据
                                 fdata = file_to_base64(sup_file)
-                                
-                                # 2. === 防重复提交逻辑 ===
-                                # 获取该用户该产品的最后一条报价
+                                # 防重复提交逻辑
                                 my_history = [b for b in pinfo['bids'] if b['supplier'] == user]
                                 is_duplicate = False
                                 if my_history:
                                     last_bid = my_history[-1]
-                                    # 比较价格、备注、文件名是否完全一致
                                     last_fname = last_bid['file']['name'] if last_bid['file'] else None
                                     curr_fname = fdata['name'] if fdata else None
-                                    
-                                    if (last_bid['price'] == price and 
-                                        last_bid['remark'] == remark and 
-                                        last_fname == curr_fname):
+                                    if (last_bid['price'] == price and last_bid['remark'] == remark and last_fname == curr_fname):
                                         is_duplicate = True
                                 
                                 if is_duplicate:
-                                    st.toast("⚠️ 报价未变更，系统已过滤重复提交", icon="🛡️")
+                                    st.toast("⚠️ 报价未变更，已过滤重复提交", icon="🛡️")
                                 else:
                                     pinfo['bids'].append({'supplier': user, 'price': price, 'remark': remark, 'file': fdata, 'time': now.strftime('%H:%M:%S'), 'datetime': now})
                                     st.toast("✅ 报价成功", icon="🎉")
-                            else: 
-                                st.toast("❌ 价格无效", icon="🚫")
-                        else: 
-                            st.error("已截止")
+                            else: st.toast("❌ 价格无效", icon="🚫")
+                        else: st.error("已截止")
             st.markdown("<hr style='margin: 0.1rem 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
 
 # --- 管理员界面 ---
@@ -225,7 +215,8 @@ def admin_dashboard():
                     cols = st.columns(4)
                     for i, (sup, code) in enumerate(p['codes'].items()):
                         with cols[i % 4]:
-                            st.markdown(f"<small><b>{sup}</b></small>", unsafe_allow_html=True)
+                            # --- 修复点：用户名也改为 code 格式，方便复制 ---
+                            st.code(sup, language=None)
                             st.code(code, language=None)
                 st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
                 st.caption("📦 产品管理")
@@ -266,7 +257,6 @@ def admin_dashboard():
                 summ.append({"产品": pn, "数量": pi['quantity'], "最低": "-", "最优": "-", "最高": "-", "价差": "-", "报价数": 0})
         st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True)
 
-        # 导出
         all_d = []
         for pn, pi in proj['products'].items():
             for b in pi['bids']:
