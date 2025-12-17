@@ -66,6 +66,7 @@ st.markdown("""
             background-color: #e6f3ff; color: #0068c9; border: 1px solid #cce5ff;
             font-size: 0.85rem; margin-right: 5px; margin-bottom: 5px;
         }
+        .sup-info { font-size: 0.8em; color: #666; margin-left: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -74,19 +75,25 @@ st.markdown("""
 def get_global_data():
     return { 
         "projects": {},
-        # 初始化默认供应商库
-        "suppliers": ["GYSA", "GYSB", "GYSC", "江苏通信", "南京华脉"] 
+        # 初始化默认供应商库 (字典结构，包含详细信息)
+        "suppliers": {
+            "GYSA": {"contact": "张经理", "phone": "13800138000", "job": "销售总监", "type": "光纤光缆", "address": "江苏省南京市江宁区xxx号"},
+            "GYSB": {"contact": "李工", "phone": "13900139000", "job": "技术支持", "type": "网络机柜", "address": "江苏省苏州市工业园区xxx号"},
+            "GYSC": {"contact": "王总", "phone": "13700137000", "job": "总经理", "type": "综合布线", "address": "上海市浦东新区xxx号"}
+        }
     }
 shared_data = get_global_data()
 
-# 清洗旧数据
+# 数据结构迁移清洗 (防止旧版本列表格式报错)
+if isinstance(shared_data.get("suppliers"), list):
+    # 如果是旧的列表格式，转为带空信息的字典
+    old_list = shared_data["suppliers"]
+    shared_data["suppliers"] = {name: {"contact": "", "phone": "", "job": "", "type": "", "address": ""} for name in old_list}
+
 invalid_pids = []
 for pid, data in shared_data["projects"].items():
     if 'deadline' not in data: invalid_pids.append(pid)
 for pid in invalid_pids: del shared_data["projects"][pid]
-# 确保供应商列表存在
-if "suppliers" not in shared_data:
-    shared_data["suppliers"] = ["GYSA", "GYSB", "GYSC"]
 
 # --- 工具函数 ---
 def generate_random_code(length=6):
@@ -181,7 +188,6 @@ def supplier_dashboard():
                         if not closed:
                             if price > 0:
                                 fdata = file_to_base64(sup_file)
-                                # 防重复提交逻辑
                                 my_history = [b for b in pinfo['bids'] if b['supplier'] == user]
                                 is_duplicate = False
                                 if my_history:
@@ -205,43 +211,79 @@ def admin_dashboard():
     st.sidebar.title("👮‍♂️ 总控")
     if st.sidebar.button("🔄 刷新数据", use_container_width=True): st.rerun()
     
-    # 增加“供应商库”菜单
     menu = st.sidebar.radio("菜单", ["项目管理", "供应商库", "监控中心"])
     
     if st.sidebar.button("退出系统"): st.session_state.clear(); st.rerun()
 
-    # === 供应商库管理 ===
+    # === 供应商库管理 (升级版) ===
     if menu == "供应商库":
         st.subheader("🏢 供应商管理")
         
-        # 添加新供应商
-        with st.container(border=True):
-            c1, c2 = st.columns([3, 1])
-            new_sup = c1.text_input("新增供应商名称", label_visibility="collapsed", placeholder="请输入供应商全称")
-            if c2.button("➕ 添加", use_container_width=True):
-                if new_sup:
-                    if new_sup not in shared_data["suppliers"]:
-                        shared_data["suppliers"].append(new_sup)
-                        st.toast(f"已添加: {new_sup}")
-                        st.rerun()
+        # 1. 新增供应商表单
+        with st.expander("➕ 登记新供应商", expanded=True):
+            with st.form("add_sup_form"):
+                st.caption("基本信息")
+                c1, c2, c3 = st.columns(3)
+                new_name = c1.text_input("供应商名称 (必填)", placeholder="企业全称")
+                new_contact = c2.text_input("联系人", placeholder="姓名")
+                new_job = c3.text_input("职位", placeholder="如: 销售经理")
+                
+                st.caption("详细信息")
+                c4, c5, c6 = st.columns(3)
+                new_phone = c4.text_input("电话", placeholder="手机/座机")
+                new_type = c5.text_input("产品类型", placeholder="如: 光缆/机柜")
+                new_addr = c6.text_input("地址", placeholder="办公地址")
+                
+                if st.form_submit_button("💾 保存录入", use_container_width=True):
+                    if new_name:
+                        if new_name not in shared_data["suppliers"]:
+                            shared_data["suppliers"][new_name] = {
+                                "contact": new_contact,
+                                "phone": new_phone,
+                                "job": new_job,
+                                "type": new_type,
+                                "address": new_addr
+                            }
+                            st.success(f"✅ 已添加: {new_name}")
+                            st.rerun()
+                        else:
+                            st.error("❌ 该供应商已存在")
                     else:
-                        st.warning("该供应商已存在")
+                        st.error("⚠️ 供应商名称不能为空")
 
-        st.caption("现有供应商列表:")
+        st.markdown("---")
+        st.subheader("📋 供应商名录")
         
-        # 显示列表（紧凑布局）
         if shared_data["suppliers"]:
-            for i, sup in enumerate(shared_data["suppliers"]):
+            # 准备表格数据
+            table_data = []
+            for name, info in shared_data["suppliers"].items():
+                table_data.append({
+                    "供应商名称": name,
+                    "联系人": info.get("contact", ""),
+                    "职位": info.get("job", ""),
+                    "电话": info.get("phone", ""),
+                    "产品类型": info.get("type", ""),
+                    "地址": info.get("address", "")
+                })
+            
+            # 显示详细表格
+            st.dataframe(pd.DataFrame(table_data), use_container_width=True, hide_index=True)
+            
+            st.caption("🗑️ 删除管理")
+            # 卡片式删除管理
+            for name in list(shared_data["suppliers"].keys()):
                 with st.container():
-                    c_name, c_del = st.columns([5, 1])
-                    c_name.markdown(f"<div class='sup-badge'>🏢 {sup}</div>", unsafe_allow_html=True)
-                    # 避免删光
-                    if c_del.button("删", key=f"del_sup_{i}"):
-                        shared_data["suppliers"].remove(sup)
+                    col_info, col_del = st.columns([6, 1])
+                    info = shared_data["suppliers"][name]
+                    # 构造摘要信息
+                    summary = f"👤 {info.get('contact','-')} | 📞 {info.get('phone','-')} | 🏷️ {info.get('type','-')}"
+                    col_info.markdown(f"<div class='compact-card'><b>🏢 {name}</b> <span class='sup-info'>{summary}</span></div>", unsafe_allow_html=True)
+                    if col_del.button("删除", key=f"del_sup_{name}"):
+                        del shared_data["suppliers"][name]
                         st.rerun()
         else:
-            st.info("暂无供应商，请添加。")
-
+            st.info("暂无供应商数据，请先录入。")
 
     # === 项目管理 ===
     elif menu == "项目管理":
@@ -253,19 +295,18 @@ def admin_dashboard():
                 d = c2.date_input("日期", datetime.now(), label_visibility="collapsed")
                 t = c3.time_input("时间", datetime.strptime("17:00", "%H:%M").time(), label_visibility="collapsed")
                 
-                # --- 修改点：改为从供应商库选择 ---
-                # 检查是否有供应商
-                available_sups = shared_data.get("suppliers", [])
+                # 获取供应商列表 (从字典key获取)
+                available_sups = list(shared_data.get("suppliers", {}).keys())
+                
                 if not available_sups:
-                    st.error("请先在【供应商库】添加供应商！")
+                    st.error("⚠️ 请先在【供应商库】录入供应商！")
                     selected_sups = []
                 else:
-                    selected_sups = st.multiselect("选择供应商", available_sups, placeholder="请选择参与报价的供应商")
+                    selected_sups = st.multiselect("选择供应商", available_sups, placeholder="请勾选参与报价的供应商")
                 
                 if st.form_submit_button("创建"):
                     if n and selected_sups:
                         pid = str(uuid.uuid4())[:8]
-                        # 直接使用选中的列表
                         codes = {x: generate_random_code() for x in selected_sups}
                         shared_data["projects"][pid] = {"name": n, "deadline": f"{d} {t.strftime('%H:%M')}", "codes": codes, "products": {}}
                         st.rerun()
