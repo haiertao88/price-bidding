@@ -10,47 +10,58 @@ from datetime import datetime, timedelta
 # --- 页面配置 ---
 st.set_page_config(page_title="华脉招采平台", layout="wide")
 
-# --- 🎨 CSS 样式深度定制 (修复遮挡+极致紧凑) ---
+# --- 🎨 CSS 样式深度修复 ---
 st.markdown("""
     <style>
-        /* 1. 修复标题被遮挡问题：增加顶部内边距 */
+        /* 1. 修复标题遮挡：加大顶部内边距 */
         .block-container {
-            padding-top: 3.5rem !important; /* 加大顶部空间 */
+            padding-top: 4rem !important;
             padding-bottom: 1rem !important;
             padding-left: 1rem !important;
             padding-right: 1rem !important;
         }
         
-        /* 2. 全局组件间距压缩 (让界面更紧凑) */
-        div[data-testid="stVerticalBlock"] > div {
-            gap: 0.2rem !important; /* 极小的间距 */
-            padding-bottom: 0px !important;
-        }
-        
-        /* 3. 优化复制框 (stCode) 的样式，去除多余高度 */
+        /* 2. 修复文字被切断：调整代码块样式，不再使用负边距 */
         .stCode {
-            margin-top: -5px !important;
-            margin-bottom: -10px !important;
+            font-size: 0.9em !important;
+            margin-bottom: 0px !important;
         }
-        pre {
-            padding: 0.2rem 0.5rem !important; /* 减小代码块内部内边距 */
+        /* 让代码块内部紧凑，但不切断文字 */
+        div[data-testid="stCodeBlock"] > pre {
+            padding: 0.4rem !important;
             border-radius: 4px !important;
         }
+
+        /* 3. 修复界面太高：强制压缩组件间距 */
+        div[data-testid="stVerticalBlock"] > div {
+            gap: 0.3rem !important;
+        }
         
-        /* 4. 紧凑型卡片 */
-        .compact-card {
-            border: 1px solid #eee;
-            background-color: #f9f9f9;
-            padding: 8px;
-            border-radius: 5px;
-            margin-bottom: 5px;
+        /* 4. 特殊处理：强制压缩文件上传框的高度 (这是导致界面高的主因) */
+        section[data-testid="stFileUploader"] {
+            padding: 0px !important;
+            min-height: 0px !important;
+        }
+        section[data-testid="stFileUploader"] > div {
+            padding-top: 5px !important;
+            padding-bottom: 5px !important;
+        }
+        /* 隐藏上传框里占用空间的文字，只留按钮 */
+        section[data-testid="stFileUploader"] small {
+            display: none;
         }
 
-        /* 5. 调整表格字体 */
-        .stDataFrame { font-size: 0.85rem; }
+        /* 5. 紧凑型卡片背景 */
+        .compact-card {
+            border: 1px solid #eee;
+            background-color: #fcfcfc;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 2px;
+        }
         
-        /* 6. 隐藏部分 label 占位 */
-        label { margin-bottom: 0px !important; min-height: 0px !important;}
+        /* 6. 表格字体微调 */
+        .stDataFrame { font-size: 0.85rem; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -82,20 +93,17 @@ def file_to_base64(uploaded_file):
 def get_download_link(file_dict, label="📎"):
     if not file_dict: return ""
     b64 = file_dict["data"]
-    href = f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{label}{file_dict["name"]}</a>'
+    href = f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{label} {file_dict["name"]}</a>'
     return href
 
 # --- 登录页面 ---
 def login_page():
-    # 使用空容器占位，确保标题不顶格
-    st.markdown("<br>", unsafe_allow_html=True) 
-    st.markdown("<h3 style='text-align: center;'>🔐 华脉招采平台</h3>", unsafe_allow_html=True)
-    
+    st.markdown("<h3 style='text-align: center; margin-bottom: 1rem;'>🔐 华脉招采平台</h3>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
         with st.container(border=True):
-            u = st.text_input("用户名", label_visibility="collapsed", placeholder="用户名").strip()
-            p = st.text_input("密码", type="password", label_visibility="collapsed", placeholder="密码/通行码").strip()
+            u = st.text_input("用户名", label_visibility="collapsed", placeholder="请输入用户名").strip()
+            p = st.text_input("密码", type="password", label_visibility="collapsed", placeholder="请输入密码/通行码").strip()
             if st.button("登录", type="primary", use_container_width=True):
                 if u == "HUAMAI" and p == "HUAMAI888":
                     st.session_state.user_type = "admin"; st.session_state.user = u; st.rerun()
@@ -107,14 +115,13 @@ def login_page():
                             st.rerun(); found = True; break
                     if not found: st.error("验证失败")
 
-# --- 供应商界面 (紧凑版) ---
+# --- 供应商界面 ---
 def supplier_dashboard():
     user = st.session_state.user
     pid = st.session_state.project_id
     proj = shared_data["projects"].get(pid)
 
     if not proj: st.error("项目不存在"); return
-
     try: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M")
     except: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M:%S")
 
@@ -137,20 +144,19 @@ def supplier_dashboard():
     if not closed and timedelta(minutes=0) < left < timedelta(minutes=15):
          st.warning("🔥 竞价最后阶段，请尽快提交！")
 
-    # 产品列表
     for pname, pinfo in products.items():
         with st.container():
+            # 标题行：产品名 + 数量 + 规格书
             st.markdown(f"""
-            <div class="compact-card">
-                <b>📦 {pname}</b> <small style='color:gray'>| 数量:{pinfo['quantity']}</small>
+            <div class="compact-card" style="display:flex; justify-content:space-between; align-items:center;">
+                <span><b>📦 {pname}</b> <small style='color:#666'>x{pinfo['quantity']}</small></span>
             </div>
             """, unsafe_allow_html=True)
             
-            # 显示规格书链接
-            link = get_download_link(pinfo.get('admin_file'), "📄规格书:")
-            if link: st.markdown(link, unsafe_allow_html=True)
+            link = get_download_link(pinfo.get('admin_file'), "📄 规格书:")
+            if link: st.markdown(f"<div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>{link}</div>", unsafe_allow_html=True)
 
-            # 报价表单 (单行显示)
+            # 报价行：价格 - 备注 - 附件 - 按钮 (单行)
             with st.form(key=f"f_{pname}", border=False):
                 fc1, fc2, fc3, fc4 = st.columns([1.5, 2, 2, 1])
                 with fc1: price = st.number_input("单价", min_value=0.0, step=0.1, label_visibility="collapsed", placeholder="¥单价")
@@ -163,11 +169,11 @@ def supplier_dashboard():
                                 fdata = file_to_base64(sup_file)
                                 pinfo['bids'].append({'supplier': user, 'price': price, 'remark': remark, 'file': fdata, 'time': now.strftime('%H:%M:%S'), 'datetime': now})
                                 st.toast("✅ 成功")
-                            else: st.toast("❌ 价格无效")
+                            else: st.toast("❌ 无效价格")
                         else: st.error("已截止")
-            st.markdown("---")
+            st.markdown("<hr style='margin: 0.1rem 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
 
-# --- 管理员界面 (修复版) ---
+# --- 管理员界面 ---
 def admin_dashboard():
     st.sidebar.title("👮‍♂️ 总控")
     menu = st.sidebar.radio("菜单", ["项目管理", "监控中心"])
@@ -176,14 +182,14 @@ def admin_dashboard():
     if menu == "项目管理":
         st.subheader("📁 项目管理")
         
-        # 新建项目 (紧凑折叠)
+        # 新建项目 (紧凑)
         with st.expander("➕ 新建项目", expanded=False):
             with st.form("new"):
-                c1, c2, c3 = st.columns([1.5, 1, 1])
+                c1, c2, c3 = st.columns([2, 1, 1])
                 n = c1.text_input("名称", placeholder="项目名", label_visibility="collapsed")
                 d = c2.date_input("日期", datetime.now(), label_visibility="collapsed")
                 t = c3.time_input("时间", datetime.strptime("17:00", "%H:%M").time(), label_visibility="collapsed")
-                s = st.text_area("供应商(逗号隔开)", "GYSA, GYSB, GYSC", height=68, placeholder="供应商")
+                s = st.text_area("供应商(逗号隔开)", "GYSA, GYSB, GYSC", height=68, placeholder="供应商列表")
                 if st.form_submit_button("创建"):
                     if n:
                         pid = str(uuid.uuid4())[:8]
@@ -199,40 +205,38 @@ def admin_dashboard():
         
         for pid, p in projs:
             with st.expander(f"📅 {p['deadline']} | {p['name']}", expanded=False):
-                # === 修复点1：用户名和密码都能复制 ===
-                st.caption("🔑 供应商授权 (鼠标悬停代码块复制)")
-                cols = st.columns(4)
-                for i, (sup, code) in enumerate(p['codes'].items()):
-                    with cols[i % 4]:
-                        # 第一行放用户名代码块
-                        st.code(sup, language=None)
-                        # 第二行放密码代码块
-                        st.code(code, language=None)
+                # 授权信息 - 修复显示不全的问题
+                st.caption("🔑 供应商授权 (可复制)")
+                # 使用 container 包裹，确保间距正常
+                with st.container():
+                    cols = st.columns(4)
+                    for i, (sup, code) in enumerate(p['codes'].items()):
+                        with cols[i % 4]:
+                            st.markdown(f"<small><b>{sup}</b></small>", unsafe_allow_html=True)
+                            st.code(code, language=None) # 标准代码块，不再强制压缩高度
                 
-                # === 修复点3：产品管理列表极致紧凑 ===
+                st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
+
+                # 产品管理 - 修复高度过高
                 st.caption("📦 产品管理")
                 for k, v in p['products'].items():
-                    # 使用 columns 把产品名和删除按钮挤在一起
                     rc1, rc2 = st.columns([8, 1])
-                    rc1.markdown(f"<div style='font-size:0.9em; padding-top:5px'>• {k} (x{v['quantity']})</div>", unsafe_allow_html=True)
+                    rc1.markdown(f"<div style='font-size:0.9em;'>• {k} (x{v['quantity']})</div>", unsafe_allow_html=True)
                     if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
                         del p['products'][k]; st.rerun()
 
-                # === 修复点3：添加产品表单单行显示 ===
+                # 添加产品表单 - 压缩上传框高度
                 with st.form(f"add_{pid}", border=False):
-                    # 比例调整：让文件上传框(ac3)不要太宽，尽量和其他一样
                     ac1, ac2, ac3, ac4 = st.columns([2, 1, 2, 1])
                     pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
                     pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed")
-                    # 文件上传框在 Streamlit 里高度很难改，但放在一行里视觉会好很多
+                    # 上传框已被 CSS 强制压缩
                     pf = ac3.file_uploader("规格", label_visibility="collapsed", key=f"f_{pid}")
                     if ac4.form_submit_button("添加"):
                         if pn and pn not in p['products']:
                             p['products'][pn] = {"quantity": pq, "bids": [], "admin_file": file_to_base64(pf)}
                             st.rerun()
                 
-                # 底部删除项目按钮，稍微留点距
-                st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
                 if st.button("🗑️ 删除该项目", key=f"del_{pid}"): del shared_data["projects"][pid]; st.rerun()
 
     elif menu == "监控中心":
@@ -243,7 +247,7 @@ def admin_dashboard():
         sel = st.selectbox("选择项目", list(opts.keys()), format_func=lambda x: opts[x])
         proj = shared_data["projects"][sel]
 
-        # 总览表
+        # 总览
         st.markdown("##### 🏆 比价总览")
         summ = []
         for pn, pi in proj['products'].items():
@@ -269,8 +273,6 @@ def admin_dashboard():
             st.download_button("📥 导出Excel", out.getvalue(), "报价明细.xlsx")
 
         st.markdown("---")
-        
-        # 详细图表
         for pn, pi in proj['products'].items():
             with st.container():
                 st.markdown(f"**📦 {pn}**")
@@ -282,11 +284,9 @@ def admin_dashboard():
                     show_df = df[['supplier','price','remark','time']].copy()
                     show_df['附件'] = ["✅" if b['file'] else "" for b in pi['bids']]
                     c2.dataframe(show_df, use_container_width=True, hide_index=True, height=180)
-                    
                     links = [get_download_link(b['file'], f"{b['supplier']}附件") for b in pi['bids'] if b['file']]
                     if links: st.markdown(" ".join(links), unsafe_allow_html=True)
-                else:
-                    st.caption("暂无报价")
+                else: st.caption("暂无报价")
                 st.divider()
 
 if 'user' not in st.session_state: login_page()
