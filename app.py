@@ -6,6 +6,7 @@ import string
 import uuid
 import base64
 from datetime import datetime, timedelta
+import hashlib
 
 # --- 页面配置 ---
 st.set_page_config(page_title="华脉招采平台", layout="wide")
@@ -51,6 +52,7 @@ st.markdown("""
             font-size: 0.85rem; transition: all 0.2s;
         }
         .file-tag:hover { background-color: #e0e4eb; border-color: #cdd3dd; color: #0068c9; }
+        .stButton>button:disabled { opacity: 0.6; cursor: not-allowed; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -67,40 +69,81 @@ def get_global_data():
     }
 shared_data = get_global_data()
 
-# 数据结构自检
+# 数据结构自检 - 增强版
 if isinstance(shared_data.get("suppliers"), list):
     old_list = shared_data["suppliers"]
-    shared_data["suppliers"] = {name: {"contact": "", "phone": "", "job": "", "type": "", "address": ""} for name in old_list}
+    new_suppliers = {}
+    for item in old_list:
+        if isinstance(item, str) and item.strip():
+            new_suppliers[item.strip()] = {"contact": "", "phone": "", "job": "", "type": "", "address": ""}
+    shared_data["suppliers"] = new_suppliers
 
+# 清理无效项目
 invalid_pids = []
 for pid, data in shared_data["projects"].items():
-    if 'deadline' not in data: invalid_pids.append(pid)
-for pid in invalid_pids: del shared_data["projects"][pid]
+    if 'deadline' not in data or not isinstance(data.get('deadline'), str):
+        invalid_pids.append(pid)
+for pid in invalid_pids: 
+    del shared_data["projects"][pid]
 
 # --- 工具函数 ---
 def generate_random_code(length=6):
     return ''.join(random.choices(string.digits, k=length))
 
-def file_to_base64(uploaded_file):
-    if uploaded_file is None: return None
+def file_to_base64(uploaded_file, max_size=200*1024*1024):  # 200MB限制
+    if uploaded_file is None: 
+        return None
+    # 检查文件大小
+    file_size = uploaded_file.size
+    if file_size > max_size:
+        st.error(f"文件过大（{file_size/1024/1024:.1f}MB），最大支持200MB")
+        return None
     try:
         bytes_data = uploaded_file.getvalue()
         b64 = base64.b64encode(bytes_data).decode()
-        return {"name": uploaded_file.name, "type": uploaded_file.type, "data": b64}
-    except Exception as e: return None
+        # 计算文件哈希（用于重复判断）
+        file_hash = hashlib.md5(bytes_data).hexdigest()
+        return {
+            "name": uploaded_file.name, 
+            "type": uploaded_file.type, 
+            "data": b64,
+            "size": file_size,
+            "hash": file_hash
+        }
+    except Exception as e:
+        st.error(f"文件处理失败: {str(e)}")
+        return None
+
+def get_file_hash(file_dict):
+    """获取文件哈希（无文件返回空）"""
+    return file_dict.get('hash', '') if file_dict else ''
 
 def get_styled_download_tag(file_dict, supplier_name=""):
-    if not file_dict: return ""
+    if not file_dict: 
+        return ""
     b64 = file_dict["data"]
     label = f"📎 {supplier_name} - {file_dict['name']}" if supplier_name else f"📎 {file_dict['name']}"
     href = f"""<a href="data:{file_dict['type']};base64,{b64}" download="{file_dict['name']}" class="file-tag" target="_blank">{label}</a>"""
     return href
 
 def get_simple_download_link(file_dict, label="📄"):
-    if not file_dict: return ""
+    if not file_dict: 
+        return ""
     b64 = file_dict["data"]
     display_text = f"{label} （华脉提供资料）: {file_dict['name']}"
     return f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{display_text}</a>'
+
+def parse_deadline(deadline_str):
+    """安全解析截止时间"""
+    formats = ["%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]
+    for fmt in formats:
+        try:
+            return datetime.strptime(deadline_str, fmt)
+        except:
+            continue
+    # 默认返回当前时间+1小时
+    st.warning(f"截止时间格式错误: {deadline_str}，已重置为1小时后")
+    return datetime.now() + timedelta(hours=1)
 
 # --- 登录页面 ---
 def login_page():
@@ -112,44 +155,88 @@ def login_page():
             p = st.text_input("密码", type="password", label_visibility="collapsed", placeholder="密码/通行码").strip()
             if st.button("登录", type="primary", use_container_width=True):
                 if u == "HUAMAI" and p == "HUAMAI888":
-                    st.session_state.user_type = "admin"; st.session_state.user = u; st.rerun()
+                    st.session_state.user_type = "admin"
+                    st.session_state.user = u
+                    if hasattr(st, 'rerun'):
+                        st.rerun()
+                    else:
+                        st.experimental_rerun()
                 else:
                     found = False
                     for pid, d in shared_data["projects"].items():
-                        if u in d["codes"] and d["codes"][u] == p:
-                            st.session_state.user_type = "supplier"; st.session_state.user = u; st.session_state.project_id = pid
-                            st.rerun(); found = True; break
-                    if not found: st.error("验证失败")
+                        if u in d.get("codes", {}) and d["codes"][u] == p:
+                            st.session_state.user_type = "supplier"
+                            st.session_state.user = u
+                            st.session_state.project_id = pid
+                            if hasattr(st, 'rerun'):
+                                st.rerun()
+                            else:
+                                st.experimental_rerun()
+                            found = True
+                            break
+                    if not found: 
+                        st.error("用户名或密码错误")
 
 # --- 供应商界面 ---
 def supplier_dashboard():
-    user = st.session_state.user
-    pid = st.session_state.project_id
+    user = st.session_state.get('user')
+    pid = st.session_state.get('project_id')
     proj = shared_data["projects"].get(pid)
-    if not proj: st.error("项目不存在"); return
     
-    try: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M")
-    except: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M:%S")
-
+    if not user or not pid or not proj:
+        st.error("会话失效，请重新登录")
+        if st.button("返回登录页"):
+            st.session_state.clear()
+            if hasattr(st, 'rerun'):
+                st.rerun()
+            else:
+                st.experimental_rerun()
+        return
+    
+    # 安全解析截止时间
+    deadline = parse_deadline(proj['deadline'])
     now = datetime.now()
     closed = now > deadline
-    left = deadline - now
+    left = deadline - now if not closed else timedelta(0)
 
+    # 页面头部
     with st.container(border=True):
         c1, c2, c3, c4, c5 = st.columns([1, 2, 1.2, 0.6, 0.6])
         c1.markdown(f"**👤 {user}**")
         c2.caption(f"项目: {proj['name']}")
-        if closed: c3.error("🚫 已截止")
-        else: c3.success(f"⏳ 剩余: {str(left).split('.')[0]}")
-        if c4.button("🔄 刷新", help="获取最新数据"): st.rerun()
-        if c5.button("退出"): st.session_state.clear(); st.rerun()
+        if closed: 
+            c3.error("🚫 已截止")
+        else: 
+            c3.success(f"⏳ 剩余: {str(left).split('.')[0]}")
+        if c4.button("🔄 刷新", help="获取最新数据"):
+            if hasattr(st, 'rerun'):
+                st.rerun()
+            else:
+                st.experimental_rerun()
+        if c5.button("退出"):
+            st.session_state.clear()
+            if hasattr(st, 'rerun'):
+                st.rerun()
+            else:
+                st.experimental_rerun()
 
-    products = proj["products"]
-    if not products: st.info("暂无产品"); return
-    if not closed and timedelta(minutes=0) < left < timedelta(minutes=15): st.warning("🔥 竞价最后阶段！")
+    # 产品列表
+    products = proj.get("products", {})
+    if not products: 
+        st.info("暂无产品")
+        return
+    
+    # 最后15分钟提醒
+    if not closed and timedelta(minutes=0) < left < timedelta(minutes=15): 
+        st.warning("🔥 竞价最后阶段！")
+
+    # 防止重复提交的锁
+    if 'submit_lock' not in st.session_state:
+        st.session_state.submit_lock = {}
 
     for pname, pinfo in products.items():
         with st.container():
+            # 产品信息
             desc_text = pinfo.get('desc', '')
             desc_html = f"<span class='prod-desc'>({desc_text})</span>" if desc_text else ""
             st.markdown(f"""
@@ -159,52 +246,105 @@ def supplier_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
+            # 管理员提供的文件
             link = get_simple_download_link(pinfo.get('admin_file'))
-            if link: st.markdown(f"<div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>{link}</div>", unsafe_allow_html=True)
+            if link: 
+                st.markdown(f"<div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>{link}</div>", unsafe_allow_html=True)
 
+            # 报价表单
             with st.form(key=f"f_{pname}", border=False):
                 fc1, fc2, fc3, fc4 = st.columns([1.5, 2, 2, 1])
-                with fc1: price = st.number_input("单价", min_value=0.0, step=0.1, label_visibility="collapsed", placeholder="¥单价")
-                with fc2: remark = st.text_input("备注", label_visibility="collapsed", placeholder="备注")
-                with fc3: sup_file = st.file_uploader("附件", type=['pdf','jpg','xlsx'], label_visibility="collapsed", key=f"u_{pname}")
+                with fc1: 
+                    price = st.number_input("单价", min_value=0.0, step=0.1, 
+                                          label_visibility="collapsed", placeholder="¥单价")
+                with fc2: 
+                    remark = st.text_input("备注", label_visibility="collapsed", placeholder="备注")
+                with fc3: 
+                    sup_file = st.file_uploader("附件", type=['pdf','jpg','xlsx'], 
+                                              label_visibility="collapsed", key=f"u_{pname}")
                 with fc4: 
-                    submitted = st.form_submit_button("提交", use_container_width=True)
+                    # 提交按钮状态控制
+                    submit_disabled = closed or st.session_state.submit_lock.get(pname, False)
+                    submitted = st.form_submit_button(
+                        "提交" if not submit_disabled else "处理中...", 
+                        use_container_width=True,
+                        disabled=submit_disabled
+                    )
+                    
                     if submitted:
-                        if not closed:
-                            if price > 0:
-                                fdata = file_to_base64(sup_file)
-                                # 防重复提交
-                                my_history = [b for b in pinfo['bids'] if b['supplier'] == user]
-                                is_duplicate = False
-                                if my_history:
-                                    last_bid = my_history[-1]
-                                    last_fname = last_bid['file']['name'] if last_bid['file'] else None
-                                    curr_fname = fdata['name'] if fdata else None
-                                    if (last_bid['price'] == price and last_bid['remark'] == remark and last_fname == curr_fname):
-                                        is_duplicate = True
-                                
-                                if is_duplicate:
-                                    st.toast("⚠️ 报价未变更，系统已过滤重复提交", icon="🛡️")
-                                else:
-                                    pinfo['bids'].append({'supplier': user, 'price': price, 'remark': remark, 'file': fdata, 'time': now.strftime('%H:%M:%S'), 'datetime': now})
-                                    st.toast("✅ 报价成功", icon="🎉")
-                            else: st.toast("❌ 价格无效", icon="🚫")
-                        else: st.error("已截止")
+                        # 加锁防止重复提交
+                        st.session_state.submit_lock[pname] = True
+                        try:
+                            if not closed:
+                                if price > 0:
+                                    fdata = file_to_base64(sup_file)
+                                    # 增强版重复判断（包含文件哈希）
+                                    my_history = [b for b in pinfo['bids'] if b['supplier'] == user]
+                                    is_duplicate = False
+                                    
+                                    if my_history:
+                                        last_bid = my_history[-1]
+                                        last_price = last_bid.get('price', 0)
+                                        last_remark = last_bid.get('remark', '')
+                                        last_file_hash = get_file_hash(last_bid.get('file'))
+                                        curr_file_hash = get_file_hash(fdata)
+                                        
+                                        if (last_price == price and 
+                                            last_remark == remark and 
+                                            last_file_hash == curr_file_hash):
+                                            is_duplicate = True
+                                    
+                                    if is_duplicate:
+                                        st.toast("⚠️ 报价未变更，系统已过滤重复提交", icon="🛡️")
+                                    else:
+                                        # 添加报价
+                                        pinfo['bids'].append({
+                                            'supplier': user, 
+                                            'price': price, 
+                                            'remark': remark, 
+                                            'file': fdata, 
+                                            'time': now.strftime('%H:%M:%S'), 
+                                            'datetime': now
+                                        })
+                                        st.toast("✅ 报价成功", icon="🎉")
+                                else: 
+                                    st.toast("❌ 价格必须大于0", icon="🚫")
+                            else: 
+                                st.error("该项目报价已截止")
+                        finally:
+                            # 解锁
+                            st.session_state.submit_lock[pname] = False
+                            # 刷新页面
+                            if hasattr(st, 'rerun'):
+                                st.rerun()
+                            else:
+                                st.experimental_rerun()
             st.markdown("<hr style='margin: 0.1rem 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
 
 # --- 管理员界面 ---
 def admin_dashboard():
-    # 🔥🔥🔥 1. 核心修复：这里必须申明全局变量，否则会报 UnboundLocalError 🔥🔥🔥
     global shared_data
     
     st.sidebar.title("👮‍♂️ 总控")
-    if st.sidebar.button("🔄 刷新数据", use_container_width=True): st.rerun()
+    if st.sidebar.button("🔄 刷新数据", use_container_width=True):
+        if hasattr(st, 'rerun'):
+            st.rerun()
+        else:
+            st.experimental_rerun()
+    
     menu = st.sidebar.radio("菜单", ["项目管理", "供应商库", "监控中心"])
-    if st.sidebar.button("退出系统"): st.session_state.clear(); st.rerun()
+    if st.sidebar.button("退出系统"):
+        st.session_state.clear()
+        if hasattr(st, 'rerun'):
+            st.rerun()
+        else:
+            st.experimental_rerun()
 
     # === 供应商库管理 ===
     if menu == "供应商库":
         st.subheader("🏢 供应商管理")
+        
+        # 添加新供应商
         with st.expander("➕ 登记新供应商", expanded=False):
             with st.form("add_sup_form"):
                 st.caption("基本信息")
@@ -212,197 +352,486 @@ def admin_dashboard():
                 new_name = c1.text_input("供应商名称 (必填)", placeholder="企业全称")
                 new_contact = c2.text_input("联系人", placeholder="姓名")
                 new_job = c3.text_input("职位", placeholder="如: 销售经理")
+                
                 st.caption("详细信息")
                 c4, c5, c6 = st.columns(3)
                 new_phone = c4.text_input("电话", placeholder="手机/座机")
                 new_type = c5.text_input("产品类型", placeholder="如: 光缆/机柜")
                 new_addr = c6.text_input("地址", placeholder="办公地址")
-                if st.form_submit_button("💾 保存录入", use_container_width=True):
-                    if new_name:
+                
+                submit_add = st.form_submit_button("💾 保存录入", use_container_width=True)
+                if submit_add:
+                    if new_name and new_name.strip():
+                        new_name = new_name.strip()
                         if new_name not in shared_data["suppliers"]:
-                            shared_data["suppliers"][new_name] = {"contact": new_contact, "phone": new_phone, "job": new_job, "type": new_type, "address": new_addr}
-                            st.success(f"✅ 已添加: {new_name}"); st.rerun()
-                        else: st.error("❌ 该供应商已存在")
-                    else: st.error("⚠️ 供应商名称不能为空")
+                            shared_data["suppliers"][new_name] = {
+                                "contact": new_contact.strip() if new_contact else "",
+                                "phone": new_phone.strip() if new_phone else "",
+                                "job": new_job.strip() if new_job else "",
+                                "type": new_type.strip() if new_type else "",
+                                "address": new_addr.strip() if new_addr else ""
+                            }
+                            st.success(f"✅ 已添加: {new_name}")
+                            if hasattr(st, 'rerun'):
+                                st.rerun()
+                            else:
+                                st.experimental_rerun()
+                        else: 
+                            st.error("❌ 该供应商已存在")
+                    else: 
+                        st.error("⚠️ 供应商名称不能为空")
 
         st.markdown("---")
         st.subheader("📋 供应商名录")
         st.info("💡 提示：可直接修改下方表格内容，改完点击【保存所有修改】。")
         
+        # 供应商列表编辑
         if shared_data["suppliers"]:
             df_source = pd.DataFrame.from_dict(shared_data["suppliers"], orient='index')
             required_cols = ["contact", "job", "phone", "type", "address"]
             for col in required_cols:
-                if col not in df_source.columns: df_source[col] = ""
+                if col not in df_source.columns: 
+                    df_source[col] = ""
             
             edited_df = st.data_editor(
                 df_source, 
-                column_config={"contact": "联系人", "job": "职位", "phone": "电话", "type": "产品类型", "address": "地址"},
+                column_config={
+                    "contact": "联系人", 
+                    "job": "职位", 
+                    "phone": "电话", 
+                    "type": "产品类型", 
+                    "address": "地址"
+                },
                 use_container_width=True, 
                 key="sup_editor"
             )
             
             if st.button("💾 保存所有修改", type="primary"):
                 shared_data["suppliers"] = edited_df.to_dict(orient='index')
-                st.toast("✅ 更新成功", icon="🎉"); st.rerun()
+                st.toast("✅ 更新成功", icon="🎉")
+                if hasattr(st, 'rerun'):
+                    st.rerun()
+                else:
+                    st.experimental_rerun()
             
             st.divider()
             st.caption("🗑️ 删除操作")
-            for name in list(shared_data["suppliers"].keys()):
-                 with st.container():
-                    col_info, col_del = st.columns([6, 1])
-                    col_info.markdown(f"**{name}**")
-                    if col_del.button("删除", key=f"del_sup_{name}"):
-                        del shared_data["suppliers"][name]; st.rerun()
-        else: st.info("暂无供应商数据")
+            # 分页显示删除按钮（避免过多按钮）
+            sup_names = list(shared_data["suppliers"].keys())
+            cols = st.columns(4)
+            for idx, name in enumerate(sup_names):
+                with cols[idx % 4]:
+                    if st.button(f"删除 {name}", key=f"del_sup_{name}"):
+                        del shared_data["suppliers"][name]
+                        if hasattr(st, 'rerun'):
+                            st.rerun()
+                        else:
+                            st.experimental_rerun()
+        else: 
+            st.info("暂无供应商数据")
 
     # === 项目管理 ===
     elif menu == "项目管理":
         st.subheader("📁 项目管理")
+        
+        # 新建项目
         with st.expander("➕ 新建项目", expanded=False):
-            with st.form("new"):
+            with st.form("new_project_form"):
                 c1, c2, c3 = st.columns([1.5, 1, 1])
-                n = c1.text_input("名称", placeholder="项目名", label_visibility="collapsed")
-                d = c2.date_input("日期", datetime.now(), label_visibility="collapsed")
-                t = c3.time_input("时间", datetime.strptime("17:00", "%H:%M").time(), label_visibility="collapsed")
+                proj_name = c1.text_input("项目名称", placeholder="请输入项目名称")
+                proj_date = c2.date_input("截止日期", datetime.now())
+                proj_time = c3.time_input("截止时间", datetime.strptime("17:00", "%H:%M").time())
+                
+                # 供应商选择
                 available_sups = list(shared_data.get("suppliers", {}).keys())
                 if not available_sups:
                     st.error("⚠️ 请先在【供应商库】录入供应商！")
                     selected_sups = []
                 else:
-                    selected_sups = st.multiselect("选择供应商", available_sups, placeholder="请勾选参与报价的供应商")
-                if st.form_submit_button("创建"):
-                    if n and selected_sups:
+                    selected_sups = st.multiselect(
+                        "选择参与报价的供应商", 
+                        available_sups, 
+                        placeholder="请勾选供应商"
+                    )
+                
+                submit_create = st.form_submit_button("🚀 创建项目", use_container_width=True)
+                if submit_create:
+                    if proj_name and selected_sups:
+                        # 生成项目ID
                         pid = str(uuid.uuid4())[:8]
-                        codes = {x: generate_random_code() for x in selected_sups}
-                        shared_data["projects"][pid] = {"name": n, "deadline": f"{d} {t.strftime('%H:%M')}", "codes": codes, "products": {}}
-                        st.rerun()
-                    elif not n: st.error("请输入项目名称")
-                    elif not selected_sups: st.error("请至少选择一个供应商")
+                        # 生成供应商密码
+                        sup_codes = {x: generate_random_code() for x in selected_sups}
+                        # 组合截止时间
+                        deadline_str = f"{proj_date} {proj_time.strftime('%H:%M')}"
+                        # 创建项目
+                        shared_data["projects"][pid] = {
+                            "name": proj_name,
+                            "deadline": deadline_str,
+                            "codes": sup_codes,
+                            "products": {}
+                        }
+                        st.success(f"✅ 项目创建成功: {proj_name}")
+                        if hasattr(st, 'rerun'):
+                            st.rerun()
+                        else:
+                            st.experimental_rerun()
+                    elif not proj_name:
+                        st.error("⚠️ 请输入项目名称")
+                    elif not selected_sups:
+                        st.error("⚠️ 请至少选择一个供应商")
 
         st.markdown("---")
-        projs = sorted([p for p in shared_data["projects"].items() if 'deadline' in p[1]], key=lambda x: x[1]['deadline'], reverse=True)
+        
+        # 现有项目管理
+        projs = sorted(
+            [p for p in shared_data["projects"].items() if 'deadline' in p[1]],
+            key=lambda x: x[1]['deadline'], 
+            reverse=True
+        )
+        
+        if not projs:
+            st.info("暂无项目数据")
+            return
+        
         for pid, p in projs:
             with st.expander(f"📅 {p['deadline']} | {p['name']}", expanded=False):
                 # 1. 追加供应商
                 with st.expander("➕ 追加供应商", expanded=False):
-                    with st.form(f"append_sup_{pid}"):
+                    with st.form(f"append_sup_form_{pid}"):
                         all_global = list(shared_data["suppliers"].keys())
                         curr_sups = list(p['codes'].keys())
-                        rem = [s for s in all_global if s not in curr_sups]
+                        rem_sups = [s for s in all_global if s not in curr_sups]
+                        
                         c_sel, c_new = st.columns(2)
-                        sel_sup = c_sel.selectbox("从库中选", ["--请选择--"] + rem)
-                        new_sup = c_new.text_input("或输入新供应商 (自动入库)", placeholder="临时新增名称")
-                        if st.form_submit_button("立即添加"):
+                        sel_sup = c_sel.selectbox("从库中选择", ["--请选择--"] + rem_sups, key=f"sel_{pid}")
+                        new_sup = c_new.text_input("或输入新供应商名称", placeholder="临时新增", key=f"new_{pid}")
+                        
+                        submit_append = st.form_submit_button("✅ 确认添加", use_container_width=True)
+                        if submit_append:
                             t_name = None
-                            if new_sup:
+                            if new_sup and new_sup.strip():
                                 t_name = new_sup.strip()
+                                # 自动入库
                                 if t_name not in shared_data["suppliers"]:
-                                    shared_data["suppliers"][t_name] = {"contact":"", "phone":"", "job":"", "type":"临时追加", "address":""}
-                            elif sel_sup != "--请选择--": t_name = sel_sup
+                                    shared_data["suppliers"][t_name] = {
+                                        "contact": "", "phone": "", "job": "", 
+                                        "type": "临时追加", "address": ""
+                                    }
+                            elif sel_sup != "--请选择--":
+                                t_name = sel_sup
+                            
                             if t_name:
                                 if t_name not in p['codes']:
                                     p['codes'][t_name] = generate_random_code()
-                                    st.success(f"✅ 已添加 {t_name}"); st.rerun()
-                                else: st.warning("已存在")
-                            else: st.warning("无效操作")
+                                    st.success(f"✅ 已添加供应商: {t_name}")
+                                    if hasattr(st, 'rerun'):
+                                        st.rerun()
+                                    else:
+                                        st.experimental_rerun()
+                                else:
+                                    st.warning("⚠️ 该供应商已在项目中")
+                            else:
+                                st.warning("⚠️ 请选择或输入供应商名称")
 
-                # 2. 供应商管理 (修复了之前挤在一起的问题，现在用4列布局)
-                st.caption("🔑 供应商管理 (含移除功能)")
+                # 2. 供应商管理（含移除）
+                st.caption("🔑 供应商列表 (用户名/密码)")
                 if p['codes']:
                     # 表头
-                    st.markdown("""<div style="display:flex; color:#666; font-size:0.8em; margin-bottom:5px;">
-                        <div style="flex:1.5;">供应商</div>
-                        <div style="flex:2;">用户名(复制)</div>
-                        <div style="flex:2;">密码(复制)</div>
+                    st.markdown("""
+                    <div style="display:flex; color:#666; font-size:0.8em; margin-bottom:5px; padding:5px; background:#f8f9fa; border-radius:4px;">
+                        <div style="flex:1.5;">供应商名称</div>
+                        <div style="flex:2;">登录用户名</div>
+                        <div style="flex:2;">登录密码</div>
                         <div style="flex:0.8;">操作</div>
-                    </div>""", unsafe_allow_html=True)
+                    </div>
+                    """, unsafe_allow_html=True)
                     
+                    # 供应商列表
                     for sup, code in list(p['codes'].items()):
                         c1, c2, c3, c4 = st.columns([1.5, 2, 2, 0.8])
-                        with c1: st.markdown(f"**{sup}**")
-                        with c2: st.code(sup, language=None)
-                        with c3: st.code(code, language=None)
+                        with c1: 
+                            st.markdown(f"**{sup}**")
+                        with c2: 
+                            st.code(sup, language=None)
+                        with c3: 
+                            st.code(code, language=None)
                         with c4:
                             if st.button("🗑️", key=f"rm_{pid}_{sup}", help="移除该供应商"):
                                 del p['codes'][sup]
-                                st.rerun()
-                else: st.info("⚠️ 当前无供应商")
+                                if hasattr(st, 'rerun'):
+                                    st.rerun()
+                                else:
+                                    st.experimental_rerun()
+                else:
+                    st.info("⚠️ 该项目暂无供应商")
                 
-                st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='margin:10px 0;'></div>", unsafe_allow_html=True)
                 
                 # 3. 产品管理
-                st.caption("📦 产品管理")
-                for k, v in p['products'].items():
-                    desc_str = f"({v.get('desc')})" if v.get('desc') else ""
-                    rc1, rc2 = st.columns([8, 1])
-                    rc1.markdown(f"<div style='font-size:0.9em;'>• {k} {desc_str} (x{v['quantity']})</div>", unsafe_allow_html=True)
-                    if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
-                        del p['products'][k]; st.rerun()
+                st.caption("📦 产品列表")
+                if p.get('products'):
+                    for k, v in p['products'].items():
+                        desc_str = f"({v.get('desc')})" if v.get('desc') else ""
+                        rc1, rc2 = st.columns([8, 1])
+                        rc1.markdown(f"""
+                        <div style='font-size:0.9em; padding:5px; border-bottom:1px solid #eee;'>
+                            • {k} {desc_str} (数量: {v['quantity']})
+                        </div>
+                        """, unsafe_allow_html=True)
+                        if rc2.button("✕", key=f"d{pid}{k}", help="删除该产品"): 
+                            del p['products'][k]
+                            if hasattr(st, 'rerun'):
+                                st.rerun()
+                            else:
+                                st.experimental_rerun()
+                else:
+                    st.info("暂无产品，请添加")
                 
-                # 添加产品表单 (修复了之前的 SyntaxError)
-                with st.form(f"add_{pid}", border=False):
+                # 添加产品表单
+                st.caption("➕ 添加产品")
+                with st.form(f"add_product_form_{pid}", border=False):
                     ac1, ac2, ac3, ac4, ac5 = st.columns([2, 1, 2, 2, 1])
-                    pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
-                    pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed")
-                    pd = ac3.text_input("描述", label_visibility="collapsed", placeholder="描述:规格/技术要求")
-                    pf = ac4.file_uploader("规格", label_visibility="collapsed", key=f"f_{pid}")
-                    if ac5.form_submit_button("添加"):
-                        if pn and pn not in p['products']:
-                            p['products'][pn] = {"quantity": pq, "desc": pd, "bids": [], "admin_file": file_to_base64(pf)}
-                            st.rerun()
-                if st.button("🗑️ 删除该项目", key=f"del_{pid}"): del shared_data["projects"][pid]; st.rerun()
+                    pn = ac1.text_input("产品名称", label_visibility="collapsed", placeholder="如: 单模光缆")
+                    pq = ac2.number_input("数量", min_value=1, value=1, label_visibility="collapsed")
+                    pd = ac3.text_input("产品描述", label_visibility="collapsed", placeholder="规格/技术要求")
+                    pf = ac4.file_uploader("上传规格文件", label_visibility="collapsed", key=f"file_{pid}")
+                    submit_add_prod = ac5.form_submit_button("添加")
+                    
+                    if submit_add_prod:
+                        if pn and pn.strip() and pn not in p['products']:
+                            p['products'][pn.strip()] = {
+                                "quantity": pq,
+                                "desc": pd.strip() if pd else "",
+                                "bids": [],
+                                "admin_file": file_to_base64(pf)
+                            }
+                            if hasattr(st, 'rerun'):
+                                st.rerun()
+                            else:
+                                st.experimental_rerun()
+                        elif not pn.strip():
+                            st.warning("⚠️ 产品名称不能为空")
+                        else:
+                            st.warning(f"⚠️ 产品 {pn} 已存在")
+                
+                # 删除项目按钮
+                col_del, _ = st.columns([1, 9])
+                if col_del.button(
+                    "🗑️ 删除该项目", 
+                    key=f"del_proj_{pid}",
+                    type="secondary"
+                ):
+                    del shared_data["projects"][pid]
+                    if hasattr(st, 'rerun'):
+                        st.rerun()
+                    else:
+                        st.experimental_rerun()
 
+    # === 监控中心 ===
     elif menu == "监控中心":
-        st.subheader("📊 监控中心")
-        opts = {k: f"{v['deadline']} - {v['name']}" for k, v in shared_data["projects"].items() if 'deadline' in v}
-        if not opts: st.warning("无数据"); return
-        sel = st.selectbox("选择项目", list(opts.keys()), format_func=lambda x: opts[x])
-        proj = shared_data["projects"][sel]
-
-        st.markdown("##### 🏆 比价总览")
-        summ = []
-        for pn, pi in proj['products'].items():
-            bids = pi['bids']
+        st.subheader("📊 报价监控中心")
+        
+        # 项目选择
+        proj_options = {
+            k: f"{v['deadline']} - {v['name']}" 
+            for k, v in shared_data["projects"].items() 
+            if 'deadline' in v and 'products' in v
+        }
+        
+        if not proj_options:
+            st.warning("暂无可用项目数据")
+            return
+        
+        selected_proj_id = st.selectbox(
+            "选择要查看的项目",
+            list(proj_options.keys()),
+            format_func=lambda x: proj_options[x]
+        )
+        
+        selected_proj = shared_data["projects"][selected_proj_id]
+        
+        # 比价总览
+        st.markdown("### 🏆 报价汇总")
+        summary_data = []
+        
+        for prod_name, prod_info in selected_proj['products'].items():
+            bids = prod_info.get('bids', [])
             if bids:
-                prices = [b['price'] for b in bids]
-                mn, mx = min(prices), max(prices)
-                best = ", ".join(set([b['supplier'] for b in bids if b['price'] == mn]))
-                diff = (mx - mn) / mn * 100 if mn > 0 else 0
-                summ.append({"产品": pn, "数量": pi['quantity'], "最低": f"¥{mn}", "最优": best, "最高": f"¥{mx}", "价差": f"{diff:.1f}%", "报价数": len(bids)})
+                # 提取有效报价
+                valid_bids = [b for b in bids if b.get('price', 0) > 0]
+                if valid_bids:
+                    prices = [b['price'] for b in valid_bids]
+                    min_price = min(prices)
+                    max_price = max(prices)
+                    # 最优供应商
+                    best_suppliers = [b['supplier'] for b in valid_bids if b['price'] == min_price]
+                    best_suppliers_str = ", ".join(set(best_suppliers))
+                    # 价差计算
+                    price_diff = (max_price - min_price) / min_price * 100 if min_price > 0 else 0
+                    # 总价计算
+                    min_total = min_price * prod_info['quantity']
+                    max_total = max_price * prod_info['quantity']
+                    
+                    summary_data.append({
+                        "产品名称": prod_name,
+                        "数量": prod_info['quantity'],
+                        "最低单价": f"¥{min_price:.2f}",
+                        "最低总价": f"¥{min_total:.2f}",
+                        "最高单价": f"¥{max_price:.2f}",
+                        "最高总价": f"¥{max_total:.2f}",
+                        "最优供应商": best_suppliers_str,
+                        "价差幅度": f"{price_diff:.1f}%",
+                        "有效报价数": len(valid_bids)
+                    })
+                else:
+                    summary_data.append({
+                        "产品名称": prod_name,
+                        "数量": prod_info['quantity'],
+                        "最低单价": "-",
+                        "最低总价": "-",
+                        "最高单价": "-",
+                        "最高总价": "-",
+                        "最优供应商": "-",
+                        "价差幅度": "-",
+                        "有效报价数": 0
+                    })
             else:
-                summ.append({"产品": pn, "数量": pi['quantity'], "最低": "-", "最优": "-", "最高": "-", "价差": "-", "报价数": 0})
-        st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True)
+                summary_data.append({
+                    "产品名称": prod_name,
+                    "数量": prod_info['quantity'],
+                    "最低单价": "-",
+                    "最低总价": "-",
+                    "最高单价": "-",
+                    "最高总价": "-",
+                    "最优供应商": "-",
+                    "价差幅度": "-",
+                    "有效报价数": 0
+                })
+        
+        # 显示汇总表格
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            # 导出Excel
+            all_detail_data = []
+            for prod_name, prod_info in selected_proj['products'].items():
+                for bid in prod_info.get('bids', []):
+                    price = bid.get('price', 0)
+                    total = price * prod_info['quantity']
+                    all_detail_data.append({
+                        "项目名称": selected_proj['name'],
+                        "产品名称": prod_name,
+                        "数量": prod_info['quantity'],
+                        "供应商": bid.get('supplier', ''),
+                        "单价": price,
+                        "总价": total,
+                        "备注": bid.get('remark', ''),
+                        "报价时间": bid.get('time', ''),
+                        "是否有附件": "是" if bid.get('file') else "否"
+                    })
+            
+            if all_detail_data:
+                # 创建Excel
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    # 汇总表
+                    summary_df.to_excel(writer, sheet_name='报价汇总', index=False)
+                    # 明细表
+                    detail_df = pd.DataFrame(all_detail_data)
+                    detail_df.to_excel(writer, sheet_name='报价明细', index=False)
+                
+                # 下载按钮
+                st.download_button(
+                    label="📥 导出Excel报表",
+                    data=output.getvalue(),
+                    file_name=f"华脉招采-{selected_proj['name']}-报价明细.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary"
+                )
+        
+        # 详细报价分析
+        st.markdown("### 📈 详细报价分析")
+        
+        for prod_name, prod_info in selected_proj['products'].items():
+            st.markdown(f"#### 📦 {prod_name} (数量: {prod_info['quantity']})")
+            
+            bids = prod_info.get('bids', [])
+            if bids:
+                # 准备图表数据
+                chart_data = []
+                table_data = []
+                
+                for bid in bids:
+                    bid_time = bid.get('datetime', datetime.now())
+                    supplier = bid.get('supplier', '未知')
+                    price = bid.get('price', 0)
+                    total = price * prod_info['quantity']
+                    remark = bid.get('remark', '')
+                    bid_time_str = bid.get('time', '')
+                    has_file = "✅" if bid.get('file') else "❌"
+                    
+                    chart_data.append({
+                        "时间": bid_time,
+                        "单价": price,
+                        "供应商": supplier
+                    })
+                    
+                    table_data.append({
+                        "供应商": supplier,
+                        "单价(¥)": f"{price:.2f}",
+                        "总价(¥)": f"{total:.2f}",
+                        "报价时间": bid_time_str,
+                        "备注": remark,
+                        "附件": has_file
+                    })
+                
+                # 双列布局：图表 + 表格
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # 报价趋势图
+                    if chart_data:
+                        chart_df = pd.DataFrame(chart_data)
+                        st.line_chart(
+                            chart_df,
+                            x='时间',
+                            y='单价',
+                            color='供应商',
+                            height=250,
+                            use_container_width=True
+                        )
+                
+                with col2:
+                    # 报价明细表
+                    st.dataframe(
+                        table_data,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=250
+                    )
+                
+                # 附件下载
+                file_tags = []
+                for bid in bids:
+                    if bid.get('file'):
+                        file_tag = get_styled_download_tag(bid['file'], bid['supplier'])
+                        if file_tag:
+                            file_tags.append(file_tag)
+                
+                if file_tags:
+                    st.markdown("##### 📎 供应商附件")
+                    st.markdown("".join(file_tags), unsafe_allow_html=True)
+            else:
+                st.info("该产品暂无报价数据")
+            
+            st.divider()
 
-        all_d = []
-        for pn, pi in proj['products'].items():
-            for b in pi['bids']:
-                all_d.append({"产品": pn, "数量": pi['quantity'], "供应商": b['supplier'], "单价": b['price'], "总价": b['price']*pi['quantity'], "备注": b['remark'], "时间": b['time']})
-        if all_d:
-            out = io.BytesIO()
-            with pd.ExcelWriter(out) as writer: pd.DataFrame(all_d).to_excel(writer, index=False)
-            st.download_button("📥 导出Excel", out.getvalue(), "报价明细.xlsx")
-
-        st.markdown("---")
-        for pn, pi in proj['products'].items():
-            with st.container():
-                st.markdown(f"**📦 {pn}**")
-                if pi['bids']:
-                    df = pd.DataFrame(pi['bids'])
-                    c1, c2 = st.columns([1, 1.5])
-                    c1.line_chart(df[['datetime','price','supplier']], x='datetime', y='price', color='supplier', height=180)
-                    show_df = df[['supplier','price','remark','time']].copy()
-                    show_df['附件状态'] = ["✅" if b['file'] else "" for b in pi['bids']]
-                    show_df.columns = ['供应商', '单价', '备注', '时间', '附件状态']
-                    c2.dataframe(show_df, use_container_width=True, hide_index=True, height=180)
-                    file_tags = [get_styled_download_tag(b['file'], b['supplier']) for b in pi['bids'] if b['file']]
-                    if file_tags:
-                        st.caption("📎 附件下载:")
-                        st.markdown("".join(file_tags), unsafe_allow_html=True)
-                else: st.caption("暂无报价")
-                st.divider()
-
-if 'user' not in st.session_state: login_page()
+# --- 主程序入口 ---
+if 'user' not in st.session_state:
+    login_page()
 else:
-    if st.session_state.user_type == "admin": admin_dashboard()
-    else: supplier_dashboard()
+    if st.session_state.user_type == "admin":
+        admin_dashboard()
+    else:
+        supplier_dashboard()
