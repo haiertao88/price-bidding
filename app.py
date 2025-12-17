@@ -75,7 +75,7 @@ st.markdown("""
 def get_global_data():
     return { 
         "projects": {},
-        # 初始化默认供应商库 (字典结构，包含详细信息)
+        # 初始化默认供应商库
         "suppliers": {
             "GYSA": {"contact": "张经理", "phone": "13800138000", "job": "销售总监", "type": "光纤光缆", "address": "江苏省南京市江宁区xxx号"},
             "GYSB": {"contact": "李工", "phone": "13900139000", "job": "技术支持", "type": "网络机柜", "address": "江苏省苏州市工业园区xxx号"},
@@ -84,9 +84,8 @@ def get_global_data():
     }
 shared_data = get_global_data()
 
-# 数据结构迁移清洗 (防止旧版本列表格式报错)
+# 数据清洗
 if isinstance(shared_data.get("suppliers"), list):
-    # 如果是旧的列表格式，转为带空信息的字典
     old_list = shared_data["suppliers"]
     shared_data["suppliers"] = {name: {"contact": "", "phone": "", "job": "", "type": "", "address": ""} for name in old_list}
 
@@ -215,11 +214,10 @@ def admin_dashboard():
     
     if st.sidebar.button("退出系统"): st.session_state.clear(); st.rerun()
 
-    # === 供应商库管理 (升级版) ===
+    # === 供应商库管理 ===
     if menu == "供应商库":
         st.subheader("🏢 供应商管理")
         
-        # 1. 新增供应商表单
         with st.expander("➕ 登记新供应商", expanded=True):
             with st.form("add_sup_form"):
                 st.caption("基本信息")
@@ -246,16 +244,13 @@ def admin_dashboard():
                             }
                             st.success(f"✅ 已添加: {new_name}")
                             st.rerun()
-                        else:
-                            st.error("❌ 该供应商已存在")
-                    else:
-                        st.error("⚠️ 供应商名称不能为空")
+                        else: st.error("❌ 该供应商已存在")
+                    else: st.error("⚠️ 供应商名称不能为空")
 
         st.markdown("---")
         st.subheader("📋 供应商名录")
         
         if shared_data["suppliers"]:
-            # 准备表格数据
             table_data = []
             for name, info in shared_data["suppliers"].items():
                 table_data.append({
@@ -266,24 +261,19 @@ def admin_dashboard():
                     "产品类型": info.get("type", ""),
                     "地址": info.get("address", "")
                 })
-            
-            # 显示详细表格
             st.dataframe(pd.DataFrame(table_data), use_container_width=True, hide_index=True)
             
             st.caption("🗑️ 删除管理")
-            # 卡片式删除管理
             for name in list(shared_data["suppliers"].keys()):
                 with st.container():
                     col_info, col_del = st.columns([6, 1])
                     info = shared_data["suppliers"][name]
-                    # 构造摘要信息
                     summary = f"👤 {info.get('contact','-')} | 📞 {info.get('phone','-')} | 🏷️ {info.get('type','-')}"
                     col_info.markdown(f"<div class='compact-card'><b>🏢 {name}</b> <span class='sup-info'>{summary}</span></div>", unsafe_allow_html=True)
                     if col_del.button("删除", key=f"del_sup_{name}"):
                         del shared_data["suppliers"][name]
                         st.rerun()
-        else:
-            st.info("暂无供应商数据，请先录入。")
+        else: st.info("暂无供应商数据")
 
     # === 项目管理 ===
     elif menu == "项目管理":
@@ -294,8 +284,6 @@ def admin_dashboard():
                 n = c1.text_input("名称", placeholder="项目名", label_visibility="collapsed")
                 d = c2.date_input("日期", datetime.now(), label_visibility="collapsed")
                 t = c3.time_input("时间", datetime.strptime("17:00", "%H:%M").time(), label_visibility="collapsed")
-                
-                # 获取供应商列表 (从字典key获取)
                 available_sups = list(shared_data.get("suppliers", {}).keys())
                 
                 if not available_sups:
@@ -310,15 +298,48 @@ def admin_dashboard():
                         codes = {x: generate_random_code() for x in selected_sups}
                         shared_data["projects"][pid] = {"name": n, "deadline": f"{d} {t.strftime('%H:%M')}", "codes": codes, "products": {}}
                         st.rerun()
-                    elif not n:
-                        st.error("请输入项目名称")
-                    elif not selected_sups:
-                        st.error("请至少选择一个供应商")
+                    elif not n: st.error("请输入项目名称")
+                    elif not selected_sups: st.error("请至少选择一个供应商")
 
         st.markdown("---")
         projs = sorted([p for p in shared_data["projects"].items() if 'deadline' in p[1]], key=lambda x: x[1]['deadline'], reverse=True)
         for pid, p in projs:
             with st.expander(f"📅 {p['deadline']} | {p['name']}", expanded=False):
+                
+                # --- 新增功能：追加供应商模块 ---
+                with st.expander("➕ 追加供应商 (点击展开)", expanded=False):
+                    with st.form(f"append_sup_{pid}"):
+                        # 计算剩余未加入的供应商
+                        all_global = list(shared_data["suppliers"].keys())
+                        current_project_sups = list(p['codes'].keys())
+                        remaining = [s for s in all_global if s not in current_project_sups]
+                        
+                        c_sel, c_new = st.columns(2)
+                        # 选项1: 从库中选
+                        sel_sup = c_sel.selectbox("从库中选", ["--请选择--"] + remaining)
+                        # 选项2: 新增
+                        new_sup = c_new.text_input("或输入新供应商 (将自动录入库)", placeholder="临时新增名称")
+                        
+                        if st.form_submit_button("立即添加"):
+                            target_name = None
+                            # 优先处理输入框
+                            if new_sup:
+                                target_name = new_sup.strip()
+                                # 如果是新供应商，自动注册到全局库
+                                if target_name not in shared_data["suppliers"]:
+                                    shared_data["suppliers"][target_name] = {"contact":"", "phone":"", "job":"", "type":"临时追加", "address":""}
+                            elif sel_sup != "--请选择--":
+                                target_name = sel_sup
+                            
+                            if target_name:
+                                if target_name not in p['codes']:
+                                    p['codes'][target_name] = generate_random_code()
+                                    st.success(f"✅ 已添加 {target_name}，密码已生成")
+                                    st.rerun()
+                                else: st.warning("该供应商已在列表中")
+                            else: st.warning("请选择或输入供应商")
+                # --------------------------------
+
                 st.caption("🔑 供应商授权 (鼠标悬停代码块复制)")
                 with st.container():
                     cols = st.columns(4)
