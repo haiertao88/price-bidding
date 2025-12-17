@@ -169,7 +169,7 @@ def supplier_dashboard():
 
     for pname, pinfo in products.items():
         with st.container():
-            # --- 显示产品描述 ---
+            # 显示产品描述
             desc_text = pinfo.get('desc', '')
             desc_html = f"<span class='prod-desc'>({desc_text})</span>" if desc_text else ""
             
@@ -214,6 +214,9 @@ def supplier_dashboard():
 
 # --- 管理员界面 ---
 def admin_dashboard():
+    # 🔥🔥🔥 关键修复：申明使用全局变量，防止 UnboundLocalError 🔥🔥🔥
+    global shared_data 
+    
     st.sidebar.title("👮‍♂️ 总控")
     if st.sidebar.button("🔄 刷新数据", use_container_width=True): st.rerun()
     menu = st.sidebar.radio("菜单", ["项目管理", "供应商库", "监控中心"])
@@ -250,9 +253,12 @@ def admin_dashboard():
             for col in required_cols:
                 if col not in df_source.columns: df_source[col] = ""
             edited_df = st.data_editor(df_source, column_config={"contact": "联系人", "job": "职位", "phone": "电话", "type": "产品类型", "address": "地址"}, use_container_width=True, key="sup_editor")
+            
             if st.button("💾 保存所有修改", type="primary"):
+                # 这里会写入 shared_data，有了 global 声明就不会报错了
                 shared_data["suppliers"] = edited_df.to_dict(orient='index')
                 st.toast("✅ 更新成功", icon="🎉"); st.rerun()
+                
             st.divider()
             for name in list(shared_data["suppliers"].keys()):
                  with st.container():
@@ -312,23 +318,20 @@ def admin_dashboard():
                                 else: st.warning("已存在")
                             else: st.warning("无效操作")
 
-                # 供应商授权与删除
+                # 供应商授权列表 (支持删除)
                 st.caption("🔑 供应商管理 (点击红色垃圾桶移除)")
-                # --- 修改：列表式显示，支持删除 ---
                 if p['codes']:
+                    # 遍历并显示，增加删除按钮
                     for sup, code in list(p['codes'].items()):
                         c_code, c_del = st.columns([5, 1])
-                        # 使用 HTML 渲染供应商行：名字 - 密码框
                         with c_code:
                             sub_c1, sub_c2 = st.columns([1, 2])
                             sub_c1.code(sup, language=None)
                             sub_c2.code(code, language=None)
-                        # 删除按钮
                         if c_del.button("🗑️", key=f"rm_sup_{pid}_{sup}", help=f"移除 {sup}"):
                             del p['codes'][sup]
                             st.rerun()
-                else:
-                    st.info("⚠️ 当前无供应商，请追加")
+                else: st.info("⚠️ 当前无供应商")
                 
                 st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
                 st.caption("📦 产品管理")
@@ -340,70 +343,8 @@ def admin_dashboard():
                     if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
                         del p['products'][k]; st.rerun()
                 
-                # --- 修改：添加产品表单增加描述 ---
+                # 添加产品 (含描述字段)
                 with st.form(f"add_{pid}", border=False):
-                    # 布局调整：名(2) 数量(1) 描述(2) 附件(2) 按钮(1)
                     ac1, ac2, ac3, ac4, ac5 = st.columns([2, 1, 2, 2, 1])
                     pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
-                    pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed")
-                    pd = ac3.text_input("描述", label_visibility="collapsed", placeholder="描述:如规格/材质")
-                    pf = ac4.file_uploader("规格", label_visibility="collapsed", key=f"f_{pid}")
-                    if ac5.form_submit_button("添加"):
-                        if pn and pn not in p['products']:
-                            p['products'][pn] = {"quantity": pq, "desc": pd, "bids": [], "admin_file": file_to_base64(pf)}
-                            st.rerun()
-                if st.button("🗑️ 删除该项目", key=f"del_{pid}"): del shared_data["projects"][pid]; st.rerun()
-
-    elif menu == "监控中心":
-        st.subheader("📊 监控中心")
-        opts = {k: f"{v['deadline']} - {v['name']}" for k, v in shared_data["projects"].items() if 'deadline' in v}
-        if not opts: st.warning("无数据"); return
-        sel = st.selectbox("选择项目", list(opts.keys()), format_func=lambda x: opts[x])
-        proj = shared_data["projects"][sel]
-
-        st.markdown("##### 🏆 比价总览")
-        summ = []
-        for pn, pi in proj['products'].items():
-            bids = pi['bids']
-            if bids:
-                prices = [b['price'] for b in bids]
-                mn, mx = min(prices), max(prices)
-                best = ", ".join(set([b['supplier'] for b in bids if b['price'] == mn]))
-                diff = (mx - mn) / mn * 100 if mn > 0 else 0
-                summ.append({"产品": pn, "数量": pi['quantity'], "最低": f"¥{mn}", "最优": best, "最高": f"¥{mx}", "价差": f"{diff:.1f}%", "报价数": len(bids)})
-            else:
-                summ.append({"产品": pn, "数量": pi['quantity'], "最低": "-", "最优": "-", "最高": "-", "价差": "-", "报价数": 0})
-        st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True)
-
-        all_d = []
-        for pn, pi in proj['products'].items():
-            for b in pi['bids']:
-                all_d.append({"产品": pn, "数量": pi['quantity'], "供应商": b['supplier'], "单价": b['price'], "总价": b['price']*pi['quantity'], "备注": b['remark'], "时间": b['time']})
-        if all_d:
-            out = io.BytesIO()
-            with pd.ExcelWriter(out) as writer: pd.DataFrame(all_d).to_excel(writer, index=False)
-            st.download_button("📥 导出Excel", out.getvalue(), "报价明细.xlsx")
-
-        st.markdown("---")
-        for pn, pi in proj['products'].items():
-            with st.container():
-                st.markdown(f"**📦 {pn}**")
-                if pi['bids']:
-                    df = pd.DataFrame(pi['bids'])
-                    c1, c2 = st.columns([1, 1.5])
-                    c1.line_chart(df[['datetime','price','supplier']], x='datetime', y='price', color='supplier', height=180)
-                    show_df = df[['supplier','price','remark','time']].copy()
-                    show_df['附件状态'] = ["✅" if b['file'] else "" for b in pi['bids']]
-                    show_df.columns = ['供应商', '单价', '备注', '时间', '附件状态']
-                    c2.dataframe(show_df, use_container_width=True, hide_index=True, height=180)
-                    file_tags = [get_styled_download_tag(b['file'], b['supplier']) for b in pi['bids'] if b['file']]
-                    if file_tags:
-                        st.caption("📎 附件下载:")
-                        st.markdown("".join(file_tags), unsafe_allow_html=True)
-                else: st.caption("暂无报价")
-                st.divider()
-
-if 'user' not in st.session_state: login_page()
-else:
-    if st.session_state.user_type == "admin": admin_dashboard()
-    else: supplier_dashboard()
+                    pq = ac2.number_input("数量", min_value=1,
