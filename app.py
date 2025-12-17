@@ -353,7 +353,7 @@ def get_simple_download_link(file_dict, label="📄"):
     display_text = f"{label} （华脉提供资料）: {file_dict['name']}"
     return f"""
     <a href="data:{file_dict['type']};base64,{b64_data}" download="{file_dict['name']}" 
-       style="text-decoration:none; color:var(--huamai-blue); font-weight:bold; font-size:clamp(0.75rem, 1.5vw, 0.85rem);">
+       style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85rem;">
         {display_text}
     </a>
     """
@@ -381,6 +381,10 @@ def safe_parse_deadline(deadline_str):
     st.warning(f"截止时间 {deadline_str} 格式错误，已重置为1小时后")
     return datetime.now() + timedelta(hours=1)
 
+def clamp(min_val, val, max_val):
+    """辅助函数：限制值的范围（兼容不同Python版本）"""
+    return max(min_val, min(val, max_val))
+
 def create_price_comparison_chart(bids_data, product_name, quantity):
     """创建供应商报价对比柱状图"""
     if not bids_data:
@@ -393,10 +397,10 @@ def create_price_comparison_chart(bids_data, product_name, quantity):
     # 创建双轴图表
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     
-    # 添加单价柱
+    # 添加单价柱（修复CSS变量为实际颜色值）
     fig.add_trace(
         go.Bar(x=suppliers, y=prices, name='单价 (¥)', 
-               marker_color=var(--huamai-blue), opacity=0.8),
+               marker_color='#0068c9', opacity=0.8),
         secondary_y=False,
     )
     
@@ -407,10 +411,10 @@ def create_price_comparison_chart(bids_data, product_name, quantity):
         secondary_y=True,
     )
     
-    # 样式配置
+    # 样式配置（修复vw单位为纯数字）
     fig.update_layout(
         title=f"{product_name} 报价对比",
-        title_font=dict(size=clamp(14, 2vw, 16), color='#333'),
+        title_font=dict(size=clamp(14, 14, 16), color='#333'),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=10, r=10, t=40, b=10),
         height=300,
@@ -418,10 +422,10 @@ def create_price_comparison_chart(bids_data, product_name, quantity):
         paper_bgcolor='white',
     )
     
-    # 轴配置
-    fig.update_xaxes(tickangle=-45, tickfont=dict(size=clamp(10, 1.5vw, 12)))
-    fig.update_yaxes(title_text="单价 (¥)", secondary_y=False, tickfont=dict(size=clamp(10, 1.5vw, 12)))
-    fig.update_yaxes(title_text="总价 (¥)", secondary_y=True, tickfont=dict(size=clamp(10, 1.5vw, 12)))
+    # 轴配置（修复vw单位为纯数字）
+    fig.update_xaxes(tickangle=-45, tickfont=dict(size=clamp(10, 12, 12)))
+    fig.update_yaxes(title_text="单价 (¥)", secondary_y=False, tickfont=dict(size=clamp(10, 12, 12)))
+    fig.update_yaxes(title_text="总价 (¥)", secondary_y=True, tickfont=dict(size=clamp(10, 12, 12)))
     
     return fig
 
@@ -447,14 +451,15 @@ def create_price_trend_chart(bids_data, product_name):
         template="plotly_white",
     )
     
+    # 修复vw单位为纯数字
     fig.update_layout(
         margin=dict(l=10, r=10, t=40, b=10),
-        title_font=dict(size=clamp(14, 2vw, 16), color='#333'),
+        title_font=dict(size=clamp(14, 14, 16), color='#333'),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     
-    fig.update_xaxes(tickfont=dict(size=clamp(10, 1.5vw, 12)))
-    fig.update_yaxes(tickfont=dict(size=clamp(10, 1.5vw, 12)))
+    fig.update_xaxes(tickfont=dict(size=clamp(10, 12, 12)))
+    fig.update_yaxes(tickfont=dict(size=clamp(10, 12, 12)))
     
     return fig
 
@@ -475,25 +480,22 @@ def create_quote_pie_chart(summary_data):
         template="plotly_white",
     )
     
+    # 修复vw单位为纯数字
     fig.update_layout(
         margin=dict(l=10, r=10, t=40, b=10),
-        title_font=dict(size=clamp(16, 2vw, 18), color='#333'),
-        legend=dict(font=dict(size=clamp(10, 1.5vw, 12))),
+        title_font=dict(size=clamp(16, 16, 18), color='#333'),
+        legend=dict(font=dict(size=clamp(10, 12, 12))),
     )
     
     return fig
 
-def clamp(min_val, val, max_val):
-    """辅助函数：限制值的范围（兼容不同Python版本）"""
-    return max(min_val, min(val, max_val))
-
 # --- 登录页面（响应式优化）---
 def render_login_page():
     """渲染登录页面"""
-    st.markdown("<h2 style='text-align: center; color: var(--huamai-blue); margin-bottom: clamp(1rem, 3vw, 2rem);'>🔐 华脉招采平台</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; color: #0068c9; margin-bottom: clamp(1rem, 3vw, 2rem);'>🔐 华脉招采平台</h2>", unsafe_allow_html=True)
     
     # 响应式登录框
-    col1, col2, col3 = st.columns([1, clamp(1.5, 50vw, 3), 1])
+    col1, col2, col3 = st.columns([1, clamp(1.5, 50, 3), 1])
     with col2:
         with st.container(border=True, height=None):
             st.markdown('<div class="hm-card" style="border:none; box-shadow:none; padding:0;">', unsafe_allow_html=True)
@@ -643,7 +645,7 @@ def render_supplier_dashboard():
         if admin_file:
             download_link = get_simple_download_link(admin_file)
             st.markdown(f"""
-                <div style='margin-bottom:1rem; font-size:clamp(0.75rem, 1.5vw, 0.85rem)'>
+                <div style='margin-bottom:1rem; font-size:0.85rem'>
                     {download_link}
                 </div>
             """, unsafe_allow_html=True)
@@ -751,14 +753,14 @@ def render_supplier_dashboard():
                     st.rerun()
         
         st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("<hr style='margin: clamp(0.5rem, 1vw, 1rem) 0; border-top: 1px solid var(--huamai-border);'>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin: clamp(0.5rem, 1vw, 1rem) 0; border-top: 1px solid #e5e7eb;'>", unsafe_allow_html=True)
 
 # --- 管理员端页面（新增图表+响应式+样式优化）---
 def render_admin_dashboard():
     """渲染管理员控制台"""
     # 侧边栏菜单（响应式）
     with st.sidebar:
-        st.markdown("<h3 style='color: var(--huamai-blue);'>👮‍♂️ 管理员控制台</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color: #0068c9;'>👮‍♂️ 管理员控制台</h3>", unsafe_allow_html=True)
         
         if st.button("🔄 刷新数据", use_container_width=True):
             st.rerun()
@@ -777,7 +779,7 @@ def render_admin_dashboard():
     
     # ========== 供应商库管理 ==========
     if menu_option == "供应商库":
-        st.markdown("<h2 style='color: var(--huamai-blue); margin-bottom: 1rem;'>🏢 供应商库管理</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color: #0068c9; margin-bottom: 1rem;'>🏢 供应商库管理</h2>", unsafe_allow_html=True)
         
         # 添加新供应商（卡片样式）
         st.markdown('<div class="hm-card">', unsafe_allow_html=True)
@@ -926,7 +928,7 @@ def render_admin_dashboard():
     
     # ========== 项目管理 ==========
     elif menu_option == "项目管理":
-        st.markdown("<h2 style='color: var(--huamai-blue); margin-bottom: 1rem;'>📁 项目管理</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color: #0068c9; margin-bottom: 1rem;'>📁 项目管理</h2>", unsafe_allow_html=True)
         
         # 新建项目（卡片样式）
         st.markdown('<div class="hm-card">', unsafe_allow_html=True)
@@ -1188,7 +1190,7 @@ def render_admin_dashboard():
     
     # ========== 监控中心（新增图表+数据可视化）==========
     elif menu_option == "监控中心":
-        st.markdown("<h2 style='color: var(--huamai-blue); margin-bottom: 1rem;'>📊 报价监控中心</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color: #0068c9; margin-bottom: 1rem;'>📊 报价监控中心</h2>", unsafe_allow_html=True)
         
         # 项目选择
         project_options = {
@@ -1293,225 +1295,3 @@ def render_admin_dashboard():
                 
                 # 价差幅度
                 price_diff = (max_price - min_price) / min_price * 100 if min_price > 0 else 0
-                
-                # 更新行数据
-                row_data.update({
-                    "最低单价": f"¥{min_price:.2f}",
-                    "最低总价": f"¥{min_total:.2f}",
-                    "最高单价": f"¥{max_price:.2f}",
-                    "最高总价": f"¥{max_total:.2f}",
-                    "最优供应商": best_suppliers_str,
-                    "价差幅度": f"{price_diff:.1f}%"
-                })
-            
-            # 添加到汇总数据
-            summary_data.append(row_data)
-        
-        # 渲染汇总表格 + 饼图（响应式布局）
-        if st.get_window_width() > 1000:
-            sum_col1, sum_col2 = st.columns([2, 1])
-        else:
-            sum_col1 = st.columns(1)[0]
-            sum_col2 = st.columns(1)[0]
-        
-        with sum_col1:
-            st.markdown('<div class="hm-card">', unsafe_allow_html=True)
-            
-            # 渲染汇总表格
-            if not summary_data:
-                summary_df = pd.DataFrame(columns=[
-                    "产品名称", "数量", "最低单价", "最低总价", 
-                    "最高单价", "最高总价", "最优供应商", "价差幅度", "有效报价数"
-                ])
-            else:
-                summary_df = pd.DataFrame(summary_data)
-            
-            st.dataframe(
-                summary_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "产品名称": st.column_config.TextColumn(width="medium"),
-                    "数量": st.column_config.NumberColumn(width="small"),
-                    "最低单价": st.column_config.TextColumn(width="small"),
-                    "最低总价": st.column_config.TextColumn(width="small"),
-                    "最高单价": st.column_config.TextColumn(width="small"),
-                    "最高总价": st.column_config.TextColumn(width="small"),
-                    "最优供应商": st.column_config.TextColumn(width="medium"),
-                    "价差幅度": st.column_config.TextColumn(width="small"),
-                    "有效报价数": st.column_config.NumberColumn(width="small"),
-                }
-            )
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        with sum_col2:
-            # 新增报价占比饼图
-            pie_fig = create_quote_pie_chart(summary_data)
-            if pie_fig:
-                st.markdown('<div class="hm-card">', unsafe_allow_html=True)
-                st.plotly_chart(pie_fig, use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                    <div class="empty-state">
-                        <i>📊</i>
-                        <p>暂无报价数据可展示</p>
-                    </div>
-                """, unsafe_allow_html=True)
-        
-        # 导出Excel
-        st.markdown("---")
-        all_detail_data = []
-        for prod_name, prod_info in products.items():
-            for bid in prod_info.get("bids", []):
-                price = bid.get("price", 0)
-                all_detail_data.append({
-                    "项目名称": selected_project["name"],
-                    "产品名称": prod_name,
-                    "数量": prod_info["quantity"],
-                    "供应商": bid.get("supplier", ""),
-                    "单价(¥)": f"{price:.2f}",
-                    "总价(¥)": f"{price * prod_info['quantity']:.2f}",
-                    "备注": bid.get("remark", ""),
-                    "报价时间": bid.get("time", ""),
-                    "附件状态": "有" if bid.get("file") else "无"
-                })
-        
-        if all_detail_data:
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                summary_df.to_excel(writer, sheet_name="报价汇总", index=False)
-                pd.DataFrame(all_detail_data).to_excel(writer, sheet_name="报价明细", index=False)
-            
-            st.download_button(
-                label="📥 导出Excel报表",
-                data=output.getvalue(),
-                file_name=f"华脉招采-{selected_project['name']}-报价报表.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                use_container_width=True
-            )
-        
-        # ========== 详细报价分析（新增多类型图表）==========
-        st.markdown("---")
-        st.markdown("<h3 style='margin: 1.5rem 0 1rem;'>📈 产品报价详情</h3>", unsafe_allow_html=True)
-        
-        for prod_name, prod_info in products.items():
-            st.markdown(f"<h4 style='color: var(--huamai-blue);'>📦 {prod_name}（数量：{prod_info['quantity']}）</h4>", unsafe_allow_html=True)
-            
-            bids = prod_info.get("bids", [])
-            if not bids:
-                st.markdown("""
-                    <div class="empty-state" style="padding: 2rem 1rem;">
-                        <i>📭</i>
-                        <p>暂无报价数据</p>
-                    </div>
-                """, unsafe_allow_html=True)
-                st.divider()
-                continue
-            
-            # 准备数据
-            chart_data = []
-            table_data = []
-            
-            for bid in bids:
-                bid_time = bid.get("datetime", datetime.now())
-                supplier = bid.get("supplier", "未知")
-                price = bid.get("price", 0)
-                total = price * prod_info["quantity"]
-                
-                chart_data.append({
-                    "时间": bid_time,
-                    "单价(¥)": price,
-                    "供应商": supplier
-                })
-                
-                table_data.append({
-                    "供应商": supplier,
-                    "单价(¥)": f"{price:.2f}",
-                    "总价(¥)": f"{total:.2f}",
-                    "报价时间": bid.get("time", ""),
-                    "备注": bid.get("remark", ""),
-                    "附件": "✅" if bid.get("file") else "❌"
-                })
-            
-            # 响应式图表布局
-            if st.get_window_width() > 1000:
-                chart_col1, chart_col2 = st.columns(2)
-            else:
-                chart_col1 = st.columns(1)[0]
-                chart_col2 = st.columns(1)[0]
-            
-            with chart_col1:
-                st.markdown('<div class="hm-card">', unsafe_allow_html=True)
-                # 新增报价对比柱状图
-                bar_fig = create_price_comparison_chart(bids, prod_name, prod_info["quantity"])
-                if bar_fig:
-                    st.plotly_chart(bar_fig, use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with chart_col2:
-                st.markdown('<div class="hm-card">', unsafe_allow_html=True)
-                # 新增报价趋势面积图
-                trend_fig = create_price_trend_chart(bids, prod_name)
-                if trend_fig:
-                    st.plotly_chart(trend_fig, use_container_width=True)
-                else:
-                    st.markdown("""
-                        <div class="empty-state">
-                            <i>📉</i>
-                            <p>数据不足，无法展示趋势</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            # 报价详情表格
-            st.markdown('<div class="hm-card">', unsafe_allow_html=True)
-            st.dataframe(
-                table_data,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "供应商": st.column_config.TextColumn(width="medium"),
-                    "单价(¥)": st.column_config.TextColumn(width="small"),
-                    "总价(¥)": st.column_config.TextColumn(width="small"),
-                    "报价时间": st.column_config.TextColumn(width="small"),
-                    "备注": st.column_config.TextColumn(width="large"),
-                    "附件": st.column_config.TextColumn(width="small"),
-                }
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # 附件下载
-            file_tags = []
-            for bid in bids:
-                if bid.get("file"):
-                    file_tag = get_styled_download_tag(bid["file"], bid["supplier"])
-                    if file_tag:
-                        file_tags.append(file_tag)
-            
-            if file_tags:
-                st.markdown("##### 📎 供应商附件")
-                st.markdown("".join(file_tags), unsafe_allow_html=True)
-            
-            st.divider()
-
-# --- 主程序入口 ---
-def main():
-    """主程序入口"""
-    # 检查会话状态
-    if "user" not in st.session_state:
-        render_login_page()
-    else:
-        user_type = st.session_state.get("user_type")
-        if user_type == "admin":
-            render_admin_dashboard()
-        elif user_type == "supplier":
-            render_supplier_dashboard()
-        else:
-            st.session_state.clear()
-            st.rerun()
-
-if __name__ == "__main__":
-    main()
