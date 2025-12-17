@@ -40,13 +40,13 @@ st.markdown("""
         /* 表格字体 */
         .stDataFrame { font-size: 0.85rem; }
 
-        /* 🔥 新增：美化后的附件下载胶囊样式 */
+        /* 附件下载胶囊样式 */
         .file-tag {
             display: inline-block;
             background-color: #f0f2f6;
             color: #31333F;
             padding: 4px 10px;
-            border-radius: 15px; /* 圆角胶囊状 */
+            border-radius: 15px;
             border: 1px solid #dce0e6;
             margin-right: 8px;
             margin-bottom: 8px;
@@ -59,7 +59,6 @@ st.markdown("""
             border-color: #cdd3dd;
             color: #0068c9;
         }
-        .file-icon { margin-right: 4px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -87,21 +86,14 @@ def file_to_base64(uploaded_file):
         return {"name": uploaded_file.name, "type": uploaded_file.type, "data": b64}
     except Exception as e: return None
 
-# 修改：生成美化后的 HTML 标签
 def get_styled_download_tag(file_dict, supplier_name=""):
     if not file_dict: return ""
     b64 = file_dict["data"]
-    # 构造 HTML 胶囊
     label = f"📎 {supplier_name} - {file_dict['name']}" if supplier_name else f"📎 {file_dict['name']}"
-    href = f"""
-    <a href="data:{file_dict['type']};base64,{b64}" download="{file_dict['name']}" class="file-tag" target="_blank">
-        {label}
-    </a>
-    """
+    href = f"""<a href="data:{file_dict['type']};base64,{b64}" download="{file_dict['name']}" class="file-tag" target="_blank">{label}</a>"""
     return href
 
 def get_simple_download_link(file_dict, label="📄"):
-    # 仅用于供应商界面的简单链接
     if not file_dict: return ""
     b64 = file_dict["data"]
     return f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{label} 规格书</a>'
@@ -125,7 +117,7 @@ def login_page():
                             st.rerun(); found = True; break
                     if not found: st.error("验证失败")
 
-# --- 供应商界面 ---
+# --- 供应商界面 (增加防重复提交逻辑) ---
 def supplier_dashboard():
     user = st.session_state.user
     pid = st.session_state.project_id
@@ -168,14 +160,38 @@ def supplier_dashboard():
                 with fc2: remark = st.text_input("备注", label_visibility="collapsed", placeholder="备注")
                 with fc3: sup_file = st.file_uploader("附件", type=['pdf','jpg','xlsx'], label_visibility="collapsed", key=f"u_{pname}")
                 with fc4: 
-                    if st.form_submit_button("提交", use_container_width=True):
+                    submitted = st.form_submit_button("提交", use_container_width=True)
+                    
+                    if submitted:
                         if not closed:
                             if price > 0:
+                                # 1. 处理文件数据
                                 fdata = file_to_base64(sup_file)
-                                pinfo['bids'].append({'supplier': user, 'price': price, 'remark': remark, 'file': fdata, 'time': now.strftime('%H:%M:%S'), 'datetime': now})
-                                st.toast("✅ 成功")
-                            else: st.toast("❌ 无效价格")
-                        else: st.error("已截止")
+                                
+                                # 2. === 防重复提交逻辑 ===
+                                # 获取该用户该产品的最后一条报价
+                                my_history = [b for b in pinfo['bids'] if b['supplier'] == user]
+                                is_duplicate = False
+                                if my_history:
+                                    last_bid = my_history[-1]
+                                    # 比较价格、备注、文件名是否完全一致
+                                    last_fname = last_bid['file']['name'] if last_bid['file'] else None
+                                    curr_fname = fdata['name'] if fdata else None
+                                    
+                                    if (last_bid['price'] == price and 
+                                        last_bid['remark'] == remark and 
+                                        last_fname == curr_fname):
+                                        is_duplicate = True
+                                
+                                if is_duplicate:
+                                    st.toast("⚠️ 报价未变更，系统已过滤重复提交", icon="🛡️")
+                                else:
+                                    pinfo['bids'].append({'supplier': user, 'price': price, 'remark': remark, 'file': fdata, 'time': now.strftime('%H:%M:%S'), 'datetime': now})
+                                    st.toast("✅ 报价成功", icon="🎉")
+                            else: 
+                                st.toast("❌ 价格无效", icon="🚫")
+                        else: 
+                            st.error("已截止")
             st.markdown("<hr style='margin: 0.1rem 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
 
 # --- 管理员界面 ---
@@ -269,26 +285,14 @@ def admin_dashboard():
                     c1, c2 = st.columns([1, 1.5])
                     c1.line_chart(df[['datetime','price','supplier']], x='datetime', y='price', color='supplier', height=180)
                     
-                    # --- 修复1：表头全中文 ---
                     show_df = df[['supplier','price','remark','time']].copy()
-                    # 替换是否有附件的显示
-                    show_df['附件'] = ["✅" if b['file'] else "" for b in pi['bids']]
-                    # 重命名列名
+                    show_df['附件状态'] = ["✅" if b['file'] else "" for b in pi['bids']]
                     show_df.columns = ['供应商', '单价', '备注', '时间', '附件状态']
-                    
                     c2.dataframe(show_df, use_container_width=True, hide_index=True, height=180)
 
-                    # --- 修复2：美化附件下载区 ---
-                    file_tags = []
-                    for b in pi['bids']:
-                        if b['file']:
-                            # 使用美化后的胶囊样式
-                            tag = get_styled_download_tag(b['file'], b['supplier'])
-                            file_tags.append(tag)
-                    
+                    file_tags = [get_styled_download_tag(b['file'], b['supplier']) for b in pi['bids'] if b['file']]
                     if file_tags:
                         st.caption("📎 附件下载:")
-                        # 直接渲染HTML，不使用 join 纯文本
                         st.markdown("".join(file_tags), unsafe_allow_html=True)
                 else: st.caption("暂无报价")
                 st.divider()
