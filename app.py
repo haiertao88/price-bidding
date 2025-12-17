@@ -154,7 +154,6 @@ def supplier_dashboard():
 
     for pname, pinfo in products.items():
         with st.container():
-            # 显示产品描述
             desc_text = pinfo.get('desc', '')
             desc_html = f"<span class='prod-desc'>({desc_text})</span>" if desc_text else ""
             
@@ -199,7 +198,7 @@ def supplier_dashboard():
 
 # --- 管理员界面 ---
 def admin_dashboard():
-    # 修复 UnboundLocalError 的关键点：声明全局变量
+    # 🔥 修复 UnboundLocalError: 声明使用全局变量
     global shared_data
     
     st.sidebar.title("👮‍♂️ 总控")
@@ -278,7 +277,6 @@ def admin_dashboard():
         projs = sorted([p for p in shared_data["projects"].items() if 'deadline' in p[1]], key=lambda x: x[1]['deadline'], reverse=True)
         for pid, p in projs:
             with st.expander(f"📅 {p['deadline']} | {p['name']}", expanded=False):
-                # 追加供应商
                 with st.expander("➕ 追加供应商", expanded=False):
                     with st.form(f"append_sup_{pid}"):
                         all_global = list(shared_data["suppliers"].keys())
@@ -301,7 +299,6 @@ def admin_dashboard():
                                 else: st.warning("已存在")
                             else: st.warning("无效操作")
 
-                # 供应商授权列表 (支持删除)
                 st.caption("🔑 供应商管理 (点击红色垃圾桶移除)")
                 if p['codes']:
                     for sup, code in list(p['codes'].items()):
@@ -324,11 +321,11 @@ def admin_dashboard():
                     if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
                         del p['products'][k]; st.rerun()
                 
-                # 添加产品 (修复了这里的语法错误)
+                # 🔥 修复 SyntaxError: 补全闭合括号
                 with st.form(f"add_{pid}", border=False):
                     ac1, ac2, ac3, ac4, ac5 = st.columns([2, 1, 2, 2, 1])
                     pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
-                    pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed")
+                    pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed") 
                     pd = ac3.text_input("描述", label_visibility="collapsed", placeholder="描述:规格/技术要求")
                     pf = ac4.file_uploader("规格", label_visibility="collapsed", key=f"f_{pid}")
                     if ac5.form_submit_button("添加"):
