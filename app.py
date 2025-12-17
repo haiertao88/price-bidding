@@ -96,7 +96,6 @@ def get_styled_download_tag(file_dict, supplier_name=""):
 def get_simple_download_link(file_dict, label="📄"):
     if not file_dict: return ""
     b64 = file_dict["data"]
-    # --- 修改点：这里增加了“（华脉提供资料）”字样 ---
     display_text = f"{label} （华脉提供资料）: {file_dict['name']}"
     return f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{display_text}</a>'
 
@@ -134,12 +133,18 @@ def supplier_dashboard():
     left = deadline - now
 
     with st.container(border=True):
-        c1, c2, c3, c4 = st.columns([1, 2, 1.5, 0.5])
+        # 修改布局：增加刷新按钮列
+        c1, c2, c3, c4, c5 = st.columns([1, 2, 1.2, 0.6, 0.6])
         c1.markdown(f"**👤 {user}**")
         c2.caption(f"项目: {proj['name']}")
         if closed: c3.error("🚫 已截止")
         else: c3.success(f"⏳ 剩余: {str(left).split('.')[0]}")
-        if c4.button("退出"): st.session_state.clear(); st.rerun()
+        
+        # --- 新增：刷新按钮 ---
+        if c4.button("🔄 刷新", help="获取最新数据"):
+            st.rerun()
+            
+        if c5.button("退出"): st.session_state.clear(); st.rerun()
 
     products = proj["products"]
     if not products: st.info("暂无产品"); return
@@ -153,7 +158,6 @@ def supplier_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
-            # 这里调用修改后的函数，显示“（华脉提供资料）”
             link = get_simple_download_link(pinfo.get('admin_file'))
             if link: st.markdown(f"<div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>{link}</div>", unsafe_allow_html=True)
 
@@ -190,8 +194,13 @@ def supplier_dashboard():
 # --- 管理员界面 ---
 def admin_dashboard():
     st.sidebar.title("👮‍♂️ 总控")
+    
+    # --- 新增：管理员侧边栏刷新按钮 ---
+    if st.sidebar.button("🔄 刷新数据", use_container_width=True):
+        st.rerun()
+        
     menu = st.sidebar.radio("菜单", ["项目管理", "监控中心"])
-    if st.sidebar.button("退出"): st.session_state.clear(); st.rerun()
+    if st.sidebar.button("退出系统"): st.session_state.clear(); st.rerun()
 
     if menu == "项目管理":
         st.subheader("📁 项目管理")
@@ -218,7 +227,6 @@ def admin_dashboard():
                     cols = st.columns(4)
                     for i, (sup, code) in enumerate(p['codes'].items()):
                         with cols[i % 4]:
-                            # --- 确保这里使用 st.code 以支持复制 ---
                             st.code(sup, language=None)
                             st.code(code, language=None)
                 st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
