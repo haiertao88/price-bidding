@@ -24,16 +24,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 全局数据结构 (已清空默认演示数据) ---
+# --- 全局数据结构 ---
 @st.cache_resource
 def get_global_data():
-    # 返回空字典，保持系统纯净
     return { "projects": {} }
 
 shared_data = get_global_data()
 
 # ==========================================
-# 🛠️ 自动修复逻辑 (防止旧数据报错)
+# 🛠️ 自动清洗逻辑
 # ==========================================
 invalid_pids = []
 for pid, data in shared_data["projects"].items():
@@ -81,12 +80,12 @@ def login_page():
             password = st.text_input("密码 / 通行码", type="password").strip()
             
             if st.button("登录", type="primary", use_container_width=True):
-                # 1. 管理员登录 (唯一固定账号)
+                # 1. 管理员
                 if username == "HUAMAI" and password == "HUAMAI888":
                     st.session_state.user_type = "admin"
                     st.session_state.user = username
                     st.rerun()
-                # 2. 供应商登录 (需先由管理员创建)
+                # 2. 供应商
                 else:
                     found_project = None
                     for pid, p_data in shared_data["projects"].items():
@@ -100,7 +99,7 @@ def login_page():
                         st.success(f"验证成功！欢迎 {username}")
                         st.rerun()
                     else:
-                        st.error("验证失败：请检查用户名或密码。")
+                        st.error("验证失败：用户名或密码错误。")
 
 # --- 供应商界面 ---
 def supplier_dashboard():
@@ -113,11 +112,18 @@ def supplier_dashboard():
         if st.button("退出"): st.session_state.clear(); st.rerun()
         return
 
+    # --- 关键修复：兼容两种时间格式，防止数据异常 ---
     try:
+        # 尝试不带秒的格式
         deadline = datetime.strptime(project['deadline'], "%Y-%m-%d %H:%M")
-    except:
-        st.error("数据异常")
-        return
+    except ValueError:
+        try:
+            # 尝试带秒的格式 (兼容旧数据)
+            deadline = datetime.strptime(project['deadline'], "%Y-%m-%d %H:%M:%S")
+        except:
+            st.error(f"时间格式严重错误: {project['deadline']}")
+            return
+    # -------------------------------------------
 
     now = datetime.now()
     is_closed = now > deadline
@@ -212,7 +218,11 @@ def admin_dashboard():
                         pid = str(uuid.uuid4())[:8]
                         sup_list = [s.strip() for s in sups.replace('，', ',').split(',') if s.strip()]
                         codes = {s: generate_random_code() for s in sup_list}
-                        deadline_str = f"{date} {time}"
+                        
+                        # --- 关键修改：格式化时间字符串，去掉秒 ---
+                        time_str = time.strftime("%H:%M")
+                        deadline_str = f"{date} {time_str}"
+                        # -----------------------------------
                         
                         shared_data["projects"][pid] = {
                             "name": name, "deadline": deadline_str,
