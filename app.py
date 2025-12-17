@@ -15,9 +15,7 @@ st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
         .st-emotion-cache-1r6slb0 { padding: 1.5rem; border-radius: 8px; border: 1px solid #eee; }
-        /* 让代码框更紧凑，方便复制 */
         .stCode { margin-bottom: 0rem !important; }
-        /* 警告框样式 */
         .warning-box {
             background-color: #fff3cd; color: #856404; padding: 1rem;
             border-radius: 5px; border: 1px solid #ffeeba; margin-bottom: 1rem;
@@ -26,10 +24,35 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 全局数据结构 ---
+# --- 全局数据结构 (含自动初始化功能) ---
 @st.cache_resource
 def get_global_data():
-    return { "projects": {} }
+    # 获取当前时间并往后推3天，作为演示项目的截止时间
+    demo_deadline = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M")
+    
+    # --- 关键修改：初始化时直接生成一个演示项目 ---
+    initial_data = {
+        "projects": {
+            "demo_project": {
+                "name": "系统功能演示 (默认)",
+                "deadline": demo_deadline,
+                "codes": {
+                    "GYSA": "123456",  # 👈 永久可用的测试账号
+                    "GYSB": "123456"   # 👈 永久可用的测试账号
+                },
+                "products": {
+                    "测试光纤跳线": {
+                        "quantity": 1000,
+                        "bids": [],
+                        "admin_file": None,
+                        "current_best_supplier": None,
+                        "last_change_time": None
+                    }
+                }
+            }
+        }
+    }
+    return initial_data
 
 shared_data = get_global_data()
 
@@ -38,20 +61,17 @@ shared_data = get_global_data()
 # ==========================================
 invalid_pids = []
 for pid, data in shared_data["projects"].items():
-    if 'deadline' not in data: # 如果旧数据没截止时间，删掉
+    if 'deadline' not in data:
         invalid_pids.append(pid)
-
 for pid in invalid_pids:
     del shared_data["projects"][pid]
 # ==========================================
 
 # --- 工具函数 ---
 def generate_random_code(length=6):
-    """生成随机数字密码"""
     return ''.join(random.choices(string.digits, k=length))
 
 def file_to_base64(uploaded_file):
-    """将上传的文件转为Base64字符串存入内存"""
     if uploaded_file is None: return None
     try:
         bytes_data = uploaded_file.getvalue()
@@ -60,14 +80,12 @@ def file_to_base64(uploaded_file):
     except Exception as e: return None
 
 def get_download_link(file_dict, label="📥 点击下载附件"):
-    """生成文件下载链接"""
     if not file_dict: return "无附件"
     b64 = file_dict["data"]
     href = f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold;">{label}</a>'
     return href
 
 def get_best_supplier(bids):
-    """获取当前最低价供应商(用于计算是否停滞)"""
     if not bids: return None, 0
     min_price = float('inf')
     best_sup = None
@@ -77,25 +95,25 @@ def get_best_supplier(bids):
             best_sup = b['supplier']
     return best_sup, min_price
 
-# --- 登录逻辑 ---
+# --- 登录逻辑 (增加去空格处理) ---
 def login_page():
     st.markdown("<h1 style='text-align: center;'>🔐 华脉招采平台</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.container(border=True):
-            username = st.text_input("用户名")
-            password = st.text_input("密码 / 通行码", type="password")
+            # 增加 .strip() 防止复制时多余的空格
+            username = st.text_input("用户名").strip()
+            password = st.text_input("密码 / 通行码", type="password").strip()
+            
             if st.button("登录", type="primary", use_container_width=True):
-                # 1. 管理员
                 if username == "HUAMAI" and password == "HUAMAI888":
                     st.session_state.user_type = "admin"
                     st.session_state.user = username
                     st.rerun()
-                # 2. 供应商
                 else:
                     found_project = None
                     for pid, p_data in shared_data["projects"].items():
-                        # 检查用户名是否存在于该项目中，且密码匹配
+                        # 检查用户名和密码是否匹配
                         if username in p_data["codes"] and p_data["codes"][username] == password:
                             found_project = pid
                             break
@@ -106,15 +124,17 @@ def login_page():
                         st.success(f"验证成功！欢迎 {username}")
                         st.rerun()
                     else:
-                        st.error("验证失败：用户名或密码错误，请联系甲方重新获取。")
+                        st.error("验证失败：用户名或密码错误。")
+            
+            # --- 增加登录提示 ---
+            st.info("💡 提示：如果刚刚重启了系统，请使用默认账号测试：\n用户 GYSA / 密码 123456")
 
-# --- 供应商界面 (盲拍 + 附件 + 智能提醒) ---
+# --- 供应商界面 ---
 def supplier_dashboard():
     current_user = st.session_state.user
     project_id = st.session_state.project_id
     project = shared_data["projects"].get(project_id)
 
-    # 安全检查
     if not project:
         st.error("项目已结束或被删除")
         if st.button("退出"): st.session_state.clear(); st.rerun()
@@ -130,7 +150,6 @@ def supplier_dashboard():
     is_closed = now > deadline
     time_left = deadline - now
 
-    # 侧边栏
     with st.sidebar:
         st.title(f"👤 {current_user}")
         st.caption(f"项目: {project['name']}")
@@ -144,7 +163,7 @@ def supplier_dashboard():
     st.markdown(f"### 📊 报价单 - {project['name']}")
     
     if is_closed:
-        st.warning("⚠️ 本轮询价已结束，通道关闭。")
+        st.warning("⚠️ 本轮询价已结束。")
         return
 
     products = project["products"]
@@ -152,7 +171,7 @@ def supplier_dashboard():
         st.info("暂无产品")
         return
 
-    # 智能提醒逻辑 (最后1小时 & 15分钟无变化)
+    # 智能提醒
     if timedelta(hours=0) < time_left < timedelta(hours=1):
         any_stagnant = False
         for p_val in products.values():
@@ -163,10 +182,8 @@ def supplier_dashboard():
         if any_stagnant:
             st.markdown('<div class="warning-box">⚠️ 竞价即将截止！已有超过15分钟未出现更有竞争力的报价。<br>请尽快提交最终方案！</div>', unsafe_allow_html=True)
 
-    # 产品列表
     for p_name, p_info in products.items():
         with st.container(border=True):
-            # 标题与甲方附件
             c_title, c_link = st.columns([2, 1])
             qty = p_info.get('quantity', 'N/A')
             c_title.markdown(f"#### 📦 {p_name} <small>(x{qty})</small>", unsafe_allow_html=True)
@@ -176,7 +193,6 @@ def supplier_dashboard():
             else:
                 c_link.caption("无规格附件")
 
-            # 报价表单
             with st.form(key=f"{project_id}_{p_name}"):
                 c1, c2, c3 = st.columns([1, 1, 1])
                 price = c1.number_input("单价 (¥)", min_value=0.0, step=0.1)
@@ -192,7 +208,6 @@ def supplier_dashboard():
                         }
                         p_info['bids'].append(new_bid)
                         
-                        # 更新最后变动时间 (用于智能提醒)
                         old_best = p_info.get('current_best_supplier')
                         new_best, _ = get_best_supplier(p_info['bids'])
                         if new_best != old_best:
@@ -210,19 +225,15 @@ def admin_dashboard():
     menu = st.sidebar.radio("菜单", ["项目管理", "报价监控"])
     if st.sidebar.button("退出"): st.session_state.clear(); st.rerun()
 
-    # === 1. 项目管理 ===
     if menu == "项目管理":
         st.title("📁 项目管理")
-        
-        # 新建项目
         with st.expander("➕ 发布新询价", expanded=True):
             with st.form("new"):
                 c1, c2, c3 = st.columns([2, 1, 1])
-                name = c1.text_input("项目名称", placeholder="例如：12月17日服务器采购")
+                name = c1.text_input("项目名称", placeholder="例如：12月17日采购")
                 date = c2.date_input("截止日期", datetime.now())
                 time = c3.time_input("截止时间", datetime.strptime("17:00", "%H:%M").time())
                 sups = st.text_area("供应商列表 (用逗号隔开)", "GYSA, GYSB, GYSC")
-                
                 if st.form_submit_button("创建"):
                     if name and sups:
                         pid = str(uuid.uuid4())[:8]
@@ -239,30 +250,25 @@ def admin_dashboard():
 
         st.divider()
         
-        # 项目列表展示
         valid_projects = []
         for pid, p in shared_data["projects"].items():
             if 'deadline' in p: valid_projects.append((pid, p))
         
-        # 按时间倒序
         for pid, p in sorted(valid_projects, key=lambda x: x[1]['deadline'], reverse=True):
             with st.expander(f"📅 截止: {p['deadline']} | {p['name']}", expanded=False):
                 
-                # --- 核心功能：账号密码分离显示 ---
                 st.markdown("##### 🔑 供应商授权 (点击右上角图标复制)")
                 h1, h2, h3 = st.columns([1, 2, 2])
                 h1.caption("供应商")
-                h2.caption("用户名 (User)")
-                h3.caption("密码 (Pass)")
+                h2.caption("用户名")
+                h3.caption("密码")
                 
                 for s, c in p['codes'].items():
                     r1, r2, r3 = st.columns([1, 2, 2])
                     r1.markdown(f"**{s}**")
                     r2.code(s, language=None)
                     r3.code(c, language=None)
-                # -------------------------------
                 
-                # 产品管理
                 st.markdown("##### 📦 产品列表")
                 if p['products']:
                     for k, v in p['products'].items():
@@ -271,12 +277,11 @@ def admin_dashboard():
                         if c_del.button("删", key=f"d{pid}{k}"): 
                             del p['products'][k]; st.rerun()
                 
-                # 添加产品 + 甲方附件
                 with st.form(f"add_p_{pid}"):
                     c1, c2, c3 = st.columns([2, 1, 2])
                     pn = c1.text_input("产品名")
                     pq = c2.number_input("数量", 1, value=100)
-                    pf = c3.file_uploader("上传规格书/图纸", key=f"f_{pid}")
+                    pf = c3.file_uploader("上传规格书", key=f"f_{pid}")
                     if st.form_submit_button("添加产品"):
                         if pn and pn not in p['products']:
                             f_data = file_to_base64(pf)
@@ -286,10 +291,9 @@ def admin_dashboard():
                             }
                             st.rerun()
                 
-                if st.button("🗑️ 删除整个项目", key=f"dd{pid}"):
+                if st.button("🗑️ 删除项目", key=f"dd{pid}"):
                     del shared_data["projects"][pid]; st.rerun()
 
-    # === 2. 报价监控 ===
     elif menu == "报价监控":
         st.title("📊 监控中心")
         if not shared_data["projects"]: st.warning("暂无项目"); return
@@ -300,7 +304,6 @@ def admin_dashboard():
         sel_id = st.selectbox("选择项目", list(opts.keys()), format_func=lambda x: opts[x])
         proj = shared_data["projects"][sel_id]
 
-        # 导出Excel
         all_data = []
         for pname, pinfo in proj['products'].items():
             for b in pinfo['bids']:
@@ -315,8 +318,6 @@ def admin_dashboard():
             st.download_button("📥 导出Excel汇总表", out.getvalue(), "报价明细.xlsx")
 
         st.divider()
-        
-        # 详细展示
         for pname, pinfo in proj['products'].items():
             with st.container(border=True):
                 st.subheader(f"📦 {pname}")
@@ -324,7 +325,6 @@ def admin_dashboard():
                     st.caption("等待报价...")
                     continue
                 
-                # 最低价计算
                 df = pd.DataFrame(pinfo['bids'])
                 best = df.loc[df['price'].idxmin()]
                 
@@ -332,16 +332,13 @@ def admin_dashboard():
                 m1.metric("最低价", f"¥{best['price']}")
                 m1.caption(f"由 {best['supplier']} 提供")
                 
-                # 趋势图
                 st.line_chart(df[['datetime', 'price', 'supplier']], x='datetime', y='price', color='supplier')
                 
-                # 详细列表 (含附件下载)
                 st.markdown("###### 📝 报价明细")
                 display_rows = []
                 for b in pinfo['bids']:
                     file_link = get_download_link(b['file'], "下载") if b['file'] else "-"
                     display_rows.append(f"| {b['supplier']} | ¥{b['price']} | {b['remark']} | {b['time']} | {file_link} |")
-                
                 st.markdown("| 供应商 | 单价 | 备注 | 时间 | 附件 |\n|---|---|---|---|---|")
                 st.markdown("\n".join(display_rows), unsafe_allow_html=True)
 
