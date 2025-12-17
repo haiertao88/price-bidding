@@ -11,7 +11,7 @@ import hashlib
 # --- 页面配置 ---
 st.set_page_config(page_title="华脉招采平台", layout="wide", page_icon="🏢")
 
-# --- 🎨 CSS 样式深度定制 (UI 2.0 优化版) ---
+# --- 🎨 CSS 样式深度定制 (V2.1 修复字体显示问题) ---
 st.markdown("""
     <style>
         /* 1. 全局布局紧凑化 */
@@ -25,6 +25,15 @@ st.markdown("""
         
         /* 2. 背景与字体优化 */
         .stApp { background-color: #f4f6f9; }
+        
+        /* ⭐️ 核心修复：标题显示不全的问题 */
+        h1, h2, h3, h4 {
+            line-height: 1.6 !important; /* 增加行高，防止切头去尾 */
+            padding-top: 10px !important; /* 顶部留出空间 */
+            padding-bottom: 10px !important; /* 底部留出空间 */
+            font-family: "Source Sans Pro", "Microsoft YaHei", "微软雅黑", sans-serif !important; /* 强制使用中文友好字体 */
+            overflow: visible !important; /* 确保内容不被裁剪 */
+        }
         
         /* 3. 卡片式容器 - 核心UI组件 */
         .ui-card {
@@ -41,7 +50,7 @@ st.markdown("""
         div[data-testid="stCodeBlock"] > pre {
             padding: 0.4rem 0.8rem !important;
             border-radius: 4px !important;
-            background-color: #f1f3f5 !important; /* 浅灰背景区分 */
+            background-color: #f1f3f5 !important;
             border: 1px solid #dee2e6 !important;
         }
 
