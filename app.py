@@ -10,10 +10,12 @@ from datetime import datetime, timedelta
 # --- 页面配置 ---
 st.set_page_config(page_title="华脉招采平台", layout="wide")
 
-# --- 🎨 CSS 样式深度定制 ---
+# --- 🎨 CSS 样式深度定制 (汉化 + 紧凑 + 美化) ---
 st.markdown("""
     <style>
-        /* 基础布局优化 */
+        /* ============================
+           1. 基础布局优化
+           ============================ */
         .block-container {
             padding-top: 4rem !important;
             padding-bottom: 1rem !important;
@@ -21,23 +23,83 @@ st.markdown("""
             padding-right: 1rem !important;
         }
         div[data-testid="stVerticalBlock"] > div { gap: 0.3rem !important; }
+
+        /* ============================
+           2. 上传组件极致汉化 & 美化
+           ============================ */
         
-        /* 复制框样式修复 */
+        /* 隐藏原本的英文提示 (Drag and drop...) */
+        [data-testid="stFileUploaderDropzoneInstructions"] > div:first-child {
+            display: none;
+        }
+        
+        /* 隐藏原本的英文限制提示 (Limit 200MB...) */
+        [data-testid="stFileUploaderDropzoneInstructions"] > div:nth-child(2) small {
+            display: none;
+        }
+
+        /* 汉化“Browse files”按钮 */
+        [data-testid="stFileUploader"] button {
+            color: transparent !important; /* 让原来的英文变透明 */
+            position: relative;
+            min-width: 80px !important;
+        }
+        [data-testid="stFileUploader"] button::after {
+            content: "📂 选择文件"; /* 伪装的中文文案 */
+            color: #31333F;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 14px;
+            font-weight: normal;
+            white-space: nowrap;
+        }
+
+        /* 重新定义上传框的布局，让它显示中文提示 */
+        [data-testid="stFileUploader"] {
+            position: relative;
+        }
+        
+        /* 在上传框内部添加中文提示文案 */
+        section[data-testid="stFileUploader"] > div > div::before {
+            content: "拖拽文件到此处 / 单个限制 200MB";
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 13px;
+            color: #888;
+            pointer-events: none; /* 确保文字不挡住点击 */
+            z-index: 1;
+        }
+        
+        /* 调整上传组件的内边距，使其更紧凑 */
+        section[data-testid="stFileUploader"] > div {
+            padding: 8px 10px !important; /* 缩小上下内边距 */
+            display: flex;
+            align-items: center;
+            justify-content: flex-end; /* 让按钮靠右，文字靠左 */
+            min-height: 40px !important;
+        }
+
+        /* 上传成功后的文件名显示优化 */
+        .uploadedFile {
+             display: flex;
+             align-items: center;
+             padding: 0px !important;
+        }
+
+        /* ============================
+           3. 其他样式修复
+           ============================ */
         .stCode { font-size: 0.9em !important; margin-bottom: 0px !important; }
         div[data-testid="stCodeBlock"] > pre { padding: 0.4rem !important; border-radius: 4px !important; }
-
-        /* 文件上传框压缩 */
-        section[data-testid="stFileUploader"] { padding: 0px !important; min-height: 0px !important; }
-        section[data-testid="stFileUploader"] > div { padding-top: 5px !important; padding-bottom: 5px !important; }
-        section[data-testid="stFileUploader"] small { display: none; }
-
-        /* 卡片背景 */
+        
         .compact-card {
             border: 1px solid #eee; background-color: #fcfcfc; padding: 8px 12px;
             border-radius: 6px; margin-bottom: 2px;
         }
-        
-        /* 表格字体 */
         .stDataFrame { font-size: 0.85rem; }
 
         /* 附件下载胶囊样式 */
@@ -133,17 +195,12 @@ def supplier_dashboard():
     left = deadline - now
 
     with st.container(border=True):
-        # 修改布局：增加刷新按钮列
         c1, c2, c3, c4, c5 = st.columns([1, 2, 1.2, 0.6, 0.6])
         c1.markdown(f"**👤 {user}**")
         c2.caption(f"项目: {proj['name']}")
         if closed: c3.error("🚫 已截止")
         else: c3.success(f"⏳ 剩余: {str(left).split('.')[0]}")
-        
-        # --- 新增：刷新按钮 ---
-        if c4.button("🔄 刷新", help="获取最新数据"):
-            st.rerun()
-            
+        if c4.button("🔄 刷新", help="获取最新数据"): st.rerun()
         if c5.button("退出"): st.session_state.clear(); st.rerun()
 
     products = proj["products"]
@@ -194,11 +251,7 @@ def supplier_dashboard():
 # --- 管理员界面 ---
 def admin_dashboard():
     st.sidebar.title("👮‍♂️ 总控")
-    
-    # --- 新增：管理员侧边栏刷新按钮 ---
-    if st.sidebar.button("🔄 刷新数据", use_container_width=True):
-        st.rerun()
-        
+    if st.sidebar.button("🔄 刷新数据", use_container_width=True): st.rerun()
     menu = st.sidebar.radio("菜单", ["项目管理", "监控中心"])
     if st.sidebar.button("退出系统"): st.session_state.clear(); st.rerun()
 
