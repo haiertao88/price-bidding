@@ -10,69 +10,66 @@ from datetime import datetime, timedelta
 # --- 页面配置 ---
 st.set_page_config(page_title="华脉招采平台", layout="wide")
 
-# --- 🎨 CSS 样式深度修复 ---
+# --- 🎨 CSS 样式深度定制 ---
 st.markdown("""
     <style>
-        /* 1. 修复标题遮挡：加大顶部内边距 */
+        /* 基础布局优化 */
         .block-container {
             padding-top: 4rem !important;
             padding-bottom: 1rem !important;
             padding-left: 1rem !important;
             padding-right: 1rem !important;
         }
+        div[data-testid="stVerticalBlock"] > div { gap: 0.3rem !important; }
         
-        /* 2. 修复文字被切断：调整代码块样式，不再使用负边距 */
-        .stCode {
-            font-size: 0.9em !important;
-            margin-bottom: 0px !important;
-        }
-        /* 让代码块内部紧凑，但不切断文字 */
-        div[data-testid="stCodeBlock"] > pre {
-            padding: 0.4rem !important;
-            border-radius: 4px !important;
-        }
+        /* 复制框样式修复 */
+        .stCode { font-size: 0.9em !important; margin-bottom: 0px !important; }
+        div[data-testid="stCodeBlock"] > pre { padding: 0.4rem !important; border-radius: 4px !important; }
 
-        /* 3. 修复界面太高：强制压缩组件间距 */
-        div[data-testid="stVerticalBlock"] > div {
-            gap: 0.3rem !important;
-        }
-        
-        /* 4. 特殊处理：强制压缩文件上传框的高度 (这是导致界面高的主因) */
-        section[data-testid="stFileUploader"] {
-            padding: 0px !important;
-            min-height: 0px !important;
-        }
-        section[data-testid="stFileUploader"] > div {
-            padding-top: 5px !important;
-            padding-bottom: 5px !important;
-        }
-        /* 隐藏上传框里占用空间的文字，只留按钮 */
-        section[data-testid="stFileUploader"] small {
-            display: none;
-        }
+        /* 文件上传框压缩 */
+        section[data-testid="stFileUploader"] { padding: 0px !important; min-height: 0px !important; }
+        section[data-testid="stFileUploader"] > div { padding-top: 5px !important; padding-bottom: 5px !important; }
+        section[data-testid="stFileUploader"] small { display: none; }
 
-        /* 5. 紧凑型卡片背景 */
+        /* 卡片背景 */
         .compact-card {
-            border: 1px solid #eee;
-            background-color: #fcfcfc;
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-bottom: 2px;
+            border: 1px solid #eee; background-color: #fcfcfc; padding: 8px 12px;
+            border-radius: 6px; margin-bottom: 2px;
         }
         
-        /* 6. 表格字体微调 */
+        /* 表格字体 */
         .stDataFrame { font-size: 0.85rem; }
+
+        /* 🔥 新增：美化后的附件下载胶囊样式 */
+        .file-tag {
+            display: inline-block;
+            background-color: #f0f2f6;
+            color: #31333F;
+            padding: 4px 10px;
+            border-radius: 15px; /* 圆角胶囊状 */
+            border: 1px solid #dce0e6;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .file-tag:hover {
+            background-color: #e0e4eb;
+            border-color: #cdd3dd;
+            color: #0068c9;
+        }
+        .file-icon { margin-right: 4px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 全局数据结构 ---
+# --- 全局数据 ---
 @st.cache_resource
 def get_global_data():
     return { "projects": {} }
-
 shared_data = get_global_data()
 
-# 🛠️ 自动清洗旧数据
+# 清洗旧数据
 invalid_pids = []
 for pid, data in shared_data["projects"].items():
     if 'deadline' not in data: invalid_pids.append(pid)
@@ -90,11 +87,24 @@ def file_to_base64(uploaded_file):
         return {"name": uploaded_file.name, "type": uploaded_file.type, "data": b64}
     except Exception as e: return None
 
-def get_download_link(file_dict, label="📎"):
+# 修改：生成美化后的 HTML 标签
+def get_styled_download_tag(file_dict, supplier_name=""):
     if not file_dict: return ""
     b64 = file_dict["data"]
-    href = f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{label} {file_dict["name"]}</a>'
+    # 构造 HTML 胶囊
+    label = f"📎 {supplier_name} - {file_dict['name']}" if supplier_name else f"📎 {file_dict['name']}"
+    href = f"""
+    <a href="data:{file_dict['type']};base64,{b64}" download="{file_dict['name']}" class="file-tag" target="_blank">
+        {label}
+    </a>
+    """
     return href
+
+def get_simple_download_link(file_dict, label="📄"):
+    # 仅用于供应商界面的简单链接
+    if not file_dict: return ""
+    b64 = file_dict["data"]
+    return f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{label} 规格书</a>'
 
 # --- 登录页面 ---
 def login_page():
@@ -102,8 +112,8 @@ def login_page():
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
         with st.container(border=True):
-            u = st.text_input("用户名", label_visibility="collapsed", placeholder="请输入用户名").strip()
-            p = st.text_input("密码", type="password", label_visibility="collapsed", placeholder="请输入密码/通行码").strip()
+            u = st.text_input("用户名", label_visibility="collapsed", placeholder="用户名").strip()
+            p = st.text_input("密码", type="password", label_visibility="collapsed", placeholder="密码/通行码").strip()
             if st.button("登录", type="primary", use_container_width=True):
                 if u == "HUAMAI" and p == "HUAMAI888":
                     st.session_state.user_type = "admin"; st.session_state.user = u; st.rerun()
@@ -120,8 +130,8 @@ def supplier_dashboard():
     user = st.session_state.user
     pid = st.session_state.project_id
     proj = shared_data["projects"].get(pid)
-
     if not proj: st.error("项目不存在"); return
+    
     try: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M")
     except: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M:%S")
 
@@ -129,7 +139,6 @@ def supplier_dashboard():
     closed = now > deadline
     left = deadline - now
 
-    # 极简顶部条
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([1, 2, 1.5, 0.5])
         c1.markdown(f"**👤 {user}**")
@@ -140,23 +149,19 @@ def supplier_dashboard():
 
     products = proj["products"]
     if not products: st.info("暂无产品"); return
-
-    if not closed and timedelta(minutes=0) < left < timedelta(minutes=15):
-         st.warning("🔥 竞价最后阶段，请尽快提交！")
+    if not closed and timedelta(minutes=0) < left < timedelta(minutes=15): st.warning("🔥 竞价最后阶段！")
 
     for pname, pinfo in products.items():
         with st.container():
-            # 标题行：产品名 + 数量 + 规格书
             st.markdown(f"""
             <div class="compact-card" style="display:flex; justify-content:space-between; align-items:center;">
                 <span><b>📦 {pname}</b> <small style='color:#666'>x{pinfo['quantity']}</small></span>
             </div>
             """, unsafe_allow_html=True)
             
-            link = get_download_link(pinfo.get('admin_file'), "📄 规格书:")
+            link = get_simple_download_link(pinfo.get('admin_file'))
             if link: st.markdown(f"<div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>{link}</div>", unsafe_allow_html=True)
 
-            # 报价行：价格 - 备注 - 附件 - 按钮 (单行)
             with st.form(key=f"f_{pname}", border=False):
                 fc1, fc2, fc3, fc4 = st.columns([1.5, 2, 2, 1])
                 with fc1: price = st.number_input("单价", min_value=0.0, step=0.1, label_visibility="collapsed", placeholder="¥单价")
@@ -181,11 +186,9 @@ def admin_dashboard():
 
     if menu == "项目管理":
         st.subheader("📁 项目管理")
-        
-        # 新建项目 (紧凑)
         with st.expander("➕ 新建项目", expanded=False):
             with st.form("new"):
-                c1, c2, c3 = st.columns([2, 1, 1])
+                c1, c2, c3 = st.columns([1.5, 1, 1])
                 n = c1.text_input("名称", placeholder="项目名", label_visibility="collapsed")
                 d = c2.date_input("日期", datetime.now(), label_visibility="collapsed")
                 t = c3.time_input("时间", datetime.strptime("17:00", "%H:%M").time(), label_visibility="collapsed")
@@ -197,57 +200,42 @@ def admin_dashboard():
                         codes = {x: generate_random_code() for x in sl}
                         shared_data["projects"][pid] = {"name": n, "deadline": f"{d} {t.strftime('%H:%M')}", "codes": codes, "products": {}}
                         st.rerun()
-        
         st.markdown("---")
-        
-        # 项目列表
         projs = sorted([p for p in shared_data["projects"].items() if 'deadline' in p[1]], key=lambda x: x[1]['deadline'], reverse=True)
-        
         for pid, p in projs:
             with st.expander(f"📅 {p['deadline']} | {p['name']}", expanded=False):
-                # 授权信息 - 修复显示不全的问题
-                st.caption("🔑 供应商授权 (可复制)")
-                # 使用 container 包裹，确保间距正常
+                st.caption("🔑 供应商授权 (鼠标悬停代码块复制)")
                 with st.container():
                     cols = st.columns(4)
                     for i, (sup, code) in enumerate(p['codes'].items()):
                         with cols[i % 4]:
                             st.markdown(f"<small><b>{sup}</b></small>", unsafe_allow_html=True)
-                            st.code(code, language=None) # 标准代码块，不再强制压缩高度
-                
+                            st.code(code, language=None)
                 st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
-
-                # 产品管理 - 修复高度过高
                 st.caption("📦 产品管理")
                 for k, v in p['products'].items():
                     rc1, rc2 = st.columns([8, 1])
                     rc1.markdown(f"<div style='font-size:0.9em;'>• {k} (x{v['quantity']})</div>", unsafe_allow_html=True)
                     if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
                         del p['products'][k]; st.rerun()
-
-                # 添加产品表单 - 压缩上传框高度
                 with st.form(f"add_{pid}", border=False):
                     ac1, ac2, ac3, ac4 = st.columns([2, 1, 2, 1])
                     pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
                     pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed")
-                    # 上传框已被 CSS 强制压缩
                     pf = ac3.file_uploader("规格", label_visibility="collapsed", key=f"f_{pid}")
                     if ac4.form_submit_button("添加"):
                         if pn and pn not in p['products']:
                             p['products'][pn] = {"quantity": pq, "bids": [], "admin_file": file_to_base64(pf)}
                             st.rerun()
-                
                 if st.button("🗑️ 删除该项目", key=f"del_{pid}"): del shared_data["projects"][pid]; st.rerun()
 
     elif menu == "监控中心":
         st.subheader("📊 监控中心")
         opts = {k: f"{v['deadline']} - {v['name']}" for k, v in shared_data["projects"].items() if 'deadline' in v}
         if not opts: st.warning("无数据"); return
-
         sel = st.selectbox("选择项目", list(opts.keys()), format_func=lambda x: opts[x])
         proj = shared_data["projects"][sel]
 
-        # 总览
         st.markdown("##### 🏆 比价总览")
         summ = []
         for pn, pi in proj['products'].items():
@@ -281,11 +269,27 @@ def admin_dashboard():
                     c1, c2 = st.columns([1, 1.5])
                     c1.line_chart(df[['datetime','price','supplier']], x='datetime', y='price', color='supplier', height=180)
                     
+                    # --- 修复1：表头全中文 ---
                     show_df = df[['supplier','price','remark','time']].copy()
+                    # 替换是否有附件的显示
                     show_df['附件'] = ["✅" if b['file'] else "" for b in pi['bids']]
+                    # 重命名列名
+                    show_df.columns = ['供应商', '单价', '备注', '时间', '附件状态']
+                    
                     c2.dataframe(show_df, use_container_width=True, hide_index=True, height=180)
-                    links = [get_download_link(b['file'], f"{b['supplier']}附件") for b in pi['bids'] if b['file']]
-                    if links: st.markdown(" ".join(links), unsafe_allow_html=True)
+
+                    # --- 修复2：美化附件下载区 ---
+                    file_tags = []
+                    for b in pi['bids']:
+                        if b['file']:
+                            # 使用美化后的胶囊样式
+                            tag = get_styled_download_tag(b['file'], b['supplier'])
+                            file_tags.append(tag)
+                    
+                    if file_tags:
+                        st.caption("📎 附件下载:")
+                        # 直接渲染HTML，不使用 join 纯文本
+                        st.markdown("".join(file_tags), unsafe_allow_html=True)
                 else: st.caption("暂无报价")
                 st.divider()
 
