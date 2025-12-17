@@ -24,35 +24,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 全局数据结构 (含自动初始化功能) ---
+# --- 全局数据结构 (已清空默认演示数据) ---
 @st.cache_resource
 def get_global_data():
-    # 获取当前时间并往后推3天，作为演示项目的截止时间
-    demo_deadline = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M")
-    
-    # --- 关键修改：初始化时直接生成一个演示项目 ---
-    initial_data = {
-        "projects": {
-            "demo_project": {
-                "name": "系统功能演示 (默认)",
-                "deadline": demo_deadline,
-                "codes": {
-                    "GYSA": "123456",  # 👈 永久可用的测试账号
-                    "GYSB": "123456"   # 👈 永久可用的测试账号
-                },
-                "products": {
-                    "测试光纤跳线": {
-                        "quantity": 1000,
-                        "bids": [],
-                        "admin_file": None,
-                        "current_best_supplier": None,
-                        "last_change_time": None
-                    }
-                }
-            }
-        }
-    }
-    return initial_data
+    # 返回空字典，保持系统纯净
+    return { "projects": {} }
 
 shared_data = get_global_data()
 
@@ -95,25 +71,25 @@ def get_best_supplier(bids):
             best_sup = b['supplier']
     return best_sup, min_price
 
-# --- 登录逻辑 (增加去空格处理) ---
+# --- 登录逻辑 ---
 def login_page():
     st.markdown("<h1 style='text-align: center;'>🔐 华脉招采平台</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.container(border=True):
-            # 增加 .strip() 防止复制时多余的空格
             username = st.text_input("用户名").strip()
             password = st.text_input("密码 / 通行码", type="password").strip()
             
             if st.button("登录", type="primary", use_container_width=True):
+                # 1. 管理员登录 (唯一固定账号)
                 if username == "HUAMAI" and password == "HUAMAI888":
                     st.session_state.user_type = "admin"
                     st.session_state.user = username
                     st.rerun()
+                # 2. 供应商登录 (需先由管理员创建)
                 else:
                     found_project = None
                     for pid, p_data in shared_data["projects"].items():
-                        # 检查用户名和密码是否匹配
                         if username in p_data["codes"] and p_data["codes"][username] == password:
                             found_project = pid
                             break
@@ -124,10 +100,7 @@ def login_page():
                         st.success(f"验证成功！欢迎 {username}")
                         st.rerun()
                     else:
-                        st.error("验证失败：用户名或密码错误。")
-            
-            # --- 增加登录提示 ---
-            st.info("💡 提示：如果刚刚重启了系统，请使用默认账号测试：\n用户 GYSA / 密码 123456")
+                        st.error("验证失败：请检查用户名或密码。")
 
 # --- 供应商界面 ---
 def supplier_dashboard():
@@ -143,7 +116,7 @@ def supplier_dashboard():
     try:
         deadline = datetime.strptime(project['deadline'], "%Y-%m-%d %H:%M")
     except:
-        st.error("数据异常，请联系管理员")
+        st.error("数据异常")
         return
 
     now = datetime.now()
@@ -180,7 +153,7 @@ def supplier_dashboard():
                 any_stagnant = True
                 break
         if any_stagnant:
-            st.markdown('<div class="warning-box">⚠️ 竞价即将截止！已有超过15分钟未出现更有竞争力的报价。<br>请尽快提交最终方案！</div>', unsafe_allow_html=True)
+            st.markdown('<div class="warning-box">⚠️ 竞价即将截止！已有超过15分钟未出现更有竞争力的报价。</div>', unsafe_allow_html=True)
 
     for p_name, p_info in products.items():
         with st.container(border=True):
@@ -196,7 +169,7 @@ def supplier_dashboard():
             with st.form(key=f"{project_id}_{p_name}"):
                 c1, c2, c3 = st.columns([1, 1, 1])
                 price = c1.number_input("单价 (¥)", min_value=0.0, step=0.1)
-                remark = c2.text_input("备注", placeholder="如:含税,货期3天")
+                remark = c2.text_input("备注", placeholder="如:含税")
                 sup_file = c3.file_uploader("上传附件", type=['pdf','png','jpg','xlsx'], key=f"up_{p_name}")
                 
                 if st.form_submit_button("🚀 提交报价"):
@@ -230,7 +203,7 @@ def admin_dashboard():
         with st.expander("➕ 发布新询价", expanded=True):
             with st.form("new"):
                 c1, c2, c3 = st.columns([2, 1, 1])
-                name = c1.text_input("项目名称", placeholder="例如：12月17日采购")
+                name = c1.text_input("项目名称", placeholder="例如：12月17日服务器采购")
                 date = c2.date_input("截止日期", datetime.now())
                 time = c3.time_input("截止时间", datetime.strptime("17:00", "%H:%M").time())
                 sups = st.text_area("供应商列表 (用逗号隔开)", "GYSA, GYSB, GYSC")
