@@ -7,93 +7,141 @@ import uuid
 import base64
 from datetime import datetime, timedelta
 import hashlib
+import json
+import os
+import time
 
 # --- 页面配置 ---
-st.set_page_config(page_title="华脉招采平台", layout="wide")
+st.set_page_config(
+    page_title="华脉招采平台", 
+    layout="wide",
+    page_icon="📋"
+)
 
-# --- 🎨 CSS 样式深度定制 ---
+# --- 🎨 CSS 样式深度定制（新增界面优化样式）---
 st.markdown("""
     <style>
+        /* 基础布局优化 */
         .block-container {
-            padding-top: 5rem !important;
+            padding-top: 2rem !important;
             padding-bottom: 2rem !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
         }
-        div[data-testid="stVerticalBlock"] > div { gap: 0.5rem !important; }
-        .stCode { font-size: 0.9em !important; margin-bottom: 0px !important; }
-        div[data-testid="stCodeBlock"] > pre { padding: 0.4rem !important; border-radius: 4px !important; }
-        section[data-testid="stFileUploader"] { padding: 0px !important; min-height: 0px !important; }
-        section[data-testid="stFileUploader"] > div { padding-top: 5px !important; padding-bottom: 5px !important; }
-        section[data-testid="stFileUploader"] small { display: none; }
-        [data-testid="stFileUploaderDropzoneInstructions"] > div:first-child { display: none; }
-        [data-testid="stFileUploaderDropzoneInstructions"] > div:nth-child(2) small { display: none; }
-        [data-testid="stFileUploader"] button { color: transparent !important; position: relative; min-width: 80px !important; }
-        [data-testid="stFileUploader"] button::after {
-            content: "📂 选择文件"; color: #31333F; position: absolute;
-            left: 50%; top: 50%; transform: translate(-50%, -50%);
-            font-size: 14px; white-space: nowrap;
+        /* 按钮样式优化 */
+        .stButton>button {
+            border-radius: 6px !important;
+            height: 2.5rem !important;
         }
-        section[data-testid="stFileUploader"] > div > div::before {
-            content: "拖拽文件到此处 / 200MB内"; position: absolute;
-            left: 10px; top: 50%; transform: translateY(-50%);
-            font-size: 13px; color: #888; pointer-events: none; z-index: 1;
+        .primary-btn {
+            background-color: #165DFF !important;
+            color: white !important;
+            border: none !important;
         }
-        section[data-testid="stFileUploader"] > div { justify-content: flex-end; }
-        .compact-card { border: 1px solid #eee; background-color: #fcfcfc; padding: 10px; border-radius: 6px; margin-bottom: 5px; }
-        .stDataFrame { font-size: 0.85rem; }
-        .prod-desc { font-size: 0.85em; color: #666; margin-left: 5px; font-style: italic;}
-        .sup-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; background-color: #e6f3ff; color: #0068c9; border: 1px solid #cce5ff; font-size: 0.85rem; margin-right: 5px; margin-bottom: 5px; }
-        .sup-info { font-size: 0.8em; color: #666; margin-left: 10px; }
-        .file-tag {
-            display: inline-block; background-color: #f0f2f6; color: #31333F;
-            padding: 4px 10px; border-radius: 15px; border: 1px solid #dce0e6;
-            margin-right: 8px; margin-bottom: 8px; text-decoration: none;
-            font-size: 0.85rem; transition: all 0.2s;
+        .secondary-btn {
+            background-color: #F0F2F5 !important;
+            color: #1D2129 !important;
+            border: 1px solid #DCDFE6 !important;
         }
-        .file-tag:hover { background-color: #e0e4eb; border-color: #cdd3dd; color: #0068c9; }
-        .stButton>button:disabled { opacity: 0.6; cursor: not-allowed; }
+        /* 表单样式优化 */
+        .stForm {
+            border: 1px solid #E5E6EB !important;
+            border-radius: 8px !important;
+            padding: 1.5rem !important;
+        }
+        /* 加载动画提示 */
+        .loading-text {
+            color: #165DFF;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        /* 成功/错误提示优化 */
+        .success-box {
+            background-color: #F0F9FF;
+            border-left: 4px solid #52C41A;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 0.5rem 0;
+        }
+        .error-box {
+            background-color: #FFF1F0;
+            border-left: 4px solid #F5222D;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 0.5rem 0;
+        }
+        /* 卡片样式 */
+        .card {
+            background-color: white;
+            border: 1px solid #E5E6EB;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 全局数据初始化（核心修复：确保数据结构绝对安全）---
-@st.cache_resource
-def init_global_data():
-    """初始化全局数据，确保所有键都存在且类型正确"""
-    return {
-        "projects": {},  # 项目字典：{项目ID: {name, deadline, codes, products}}
-        "suppliers": {   # 供应商字典：{供应商名称: {contact, phone, job, type, address}}
+# --- 📊 数据持久化核心配置 ---
+DATA_FILE = "huamai_platform_data.json"  # 数据存储文件
+
+def save_data(data):
+    """将数据保存到JSON文件（持久化）"""
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"数据保存失败：{str(e)}")
+        return False
+
+def load_data():
+    """从JSON文件加载数据（持久化）"""
+    default_data = {
+        "projects": {},  # 项目数据
+        "suppliers": {   # 供应商初始数据
             "GYSA": {"contact": "张经理", "phone": "13800138000", "job": "销售总监", "type": "光纤光缆", "address": "江苏省南京市江宁区xxx号"},
             "GYSB": {"contact": "李工", "phone": "13900139000", "job": "技术支持", "type": "网络机柜", "address": "江苏省苏州市工业园区xxx号"},
             "GYSC": {"contact": "王总", "phone": "13700137000", "job": "总经理", "type": "综合布线", "address": "上海市浦东新区xxx号"}
-        }
+        },
+        "sms_records": []  # 预留字段：短信记录
     }
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            # 文件损坏则返回默认数据并重新保存
+            save_data(default_data)
+            return default_data
+    else:
+        # 无文件则创建并保存默认数据
+        save_data(default_data)
+        return default_data
 
-# 全局数据实例（确保整个程序共用一份）
+# 初始化全局数据（持久化）
+@st.cache_resource
+def init_global_data():
+    return load_data()
+
 global_data = init_global_data()
 
 # --- 工具函数 ---
 def generate_random_code(length=6):
-    """生成随机数字验证码"""
+    """生成随机数字验证码/密码"""
     return ''.join(random.choices(string.digits, k=length))
 
 def file_to_base64(uploaded_file, max_size=200*1024*1024):
-    """将上传文件转为base64，包含大小限制和哈希计算"""
+    """文件转Base64（带大小限制）"""
     if uploaded_file is None:
         return None
-    
-    # 检查文件大小（200MB限制）
     file_size = uploaded_file.size
     if file_size > max_size:
         st.error(f"文件过大（{file_size/1024/1024:.1f}MB），最大支持200MB")
         return None
-    
     try:
         bytes_data = uploaded_file.getvalue()
         b64_encoded = base64.b64encode(bytes_data).decode('utf-8')
-        # 计算文件哈希（用于重复提交判断）
         file_hash = hashlib.md5(bytes_data).hexdigest()
-        
         return {
             "name": uploaded_file.name,
             "type": uploaded_file.type,
@@ -105,853 +153,515 @@ def file_to_base64(uploaded_file, max_size=200*1024*1024):
         st.error(f"文件处理失败：{str(e)}")
         return None
 
-def get_file_hash(file_dict):
-    """获取文件哈希（无文件返回空字符串）"""
-    return file_dict.get('hash', '') if isinstance(file_dict, dict) else ''
-
-def get_styled_download_tag(file_dict, supplier_name=""):
-    """生成带样式的文件下载标签"""
-    if not isinstance(file_dict, dict) or not file_dict.get('data'):
-        return ""
-    
-    b64_data = file_dict["data"]
-    display_label = f"📎 {supplier_name} - {file_dict['name']}" if supplier_name else f"📎 {file_dict['name']}"
-    return f"""
-    <a href="data:{file_dict['type']};base64,{b64_data}" download="{file_dict['name']}" class="file-tag" target="_blank">
-        {display_label}
-    </a>
-    """
-
-def get_simple_download_link(file_dict, label="📄"):
-    """生成简单的下载链接"""
-    if not isinstance(file_dict, dict) or not file_dict.get('data'):
-        return ""
-    
-    b64_data = file_dict["data"]
-    display_text = f"{label} （华脉提供资料）: {file_dict['name']}"
-    return f"""
-    <a href="data:{file_dict['type']};base64,{b64_data}" download="{file_dict['name']}" 
-       style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">
-        {display_text}
-    </a>
-    """
-
 def safe_parse_deadline(deadline_str):
-    """安全解析截止时间，兼容多种格式"""
+    """安全解析截止时间"""
     if not isinstance(deadline_str, str):
         st.warning("截止时间格式错误，已重置为1小时后")
         return datetime.now() + timedelta(hours=1)
-    
-    # 支持的时间格式列表
-    supported_formats = [
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d"
-    ]
-    
+    supported_formats = ["%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]
     for fmt in supported_formats:
         try:
             return datetime.strptime(deadline_str, fmt)
         except ValueError:
             continue
-    
-    # 所有格式都不匹配时的兜底
-    st.warning(f"截止时间 {deadline_str} 格式错误，已重置为1小时后")
-    return datetime.now() + timedelta(hours=1)
+    st.warning(f"截止时间 {deadline_str} 格式错误，已重置为当前时间")
+    return datetime.now()
 
-# --- 登录页面 ---
+# --- 页面渲染函数 ---
 def render_login_page():
-    """渲染登录页面"""
-    st.markdown("<h3 style='text-align: center; margin-bottom: 1rem;'>🔐 华脉招采平台</h3>", unsafe_allow_html=True)
+    """登录页面（界面优化）"""
+    st.title("🔑 华脉招采平台登录")
+    st.divider()
     
-    # 居中登录框
-    col1, col2, col3 = st.columns([1, 1.5, 1])
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        with st.container(border=True):
+        with st.form("login_form", border=True):
+            st.markdown("### 账号密码登录")
             username = st.text_input(
                 "用户名",
-                label_visibility="collapsed",
-                placeholder="请输入用户名"
+                placeholder="请输入您的用户名",
+                label_visibility="collapsed"
             ).strip()
-            
             password = st.text_input(
                 "密码",
                 type="password",
-                label_visibility="collapsed",
-                placeholder="请输入密码"
+                placeholder="请输入您的密码",
+                label_visibility="collapsed"
             ).strip()
             
-            if st.button("登录", type="primary", use_container_width=True):
-                # 管理员登录验证
-                if username == "HUAMAI" and password == "HUAMAI888":
-                    st.session_state["user_type"] = "admin"
-                    st.session_state["user"] = username
-                    st.rerun()
-                
-                # 供应商登录验证
-                else:
-                    login_success = False
-                    for project_id, project_data in global_data["projects"].items():
-                        supplier_codes = project_data.get("codes", {})
-                        if username in supplier_codes and supplier_codes[username] == password:
+            login_btn = st.form_submit_button("登录", type="primary")
+            if login_btn:
+                with st.spinner("正在验证账号..."):
+                    time.sleep(1)  # 模拟验证耗时
+                    # 管理员账号验证
+                    if username == "HUAMAI" and password == "HUAMAI888":
+                        st.session_state["user_type"] = "admin"
+                        st.session_state["user"] = username
+                        st.success("登录成功！正在跳转...")
+                        time.sleep(0.5)
+                        st.rerun()
+                    # 供应商账号验证
+                    else:
+                        login_success = False
+                        target_project_id = None
+                        # 遍历所有项目验证供应商账号
+                        for project_id, project_data in global_data["projects"].items():
+                            supplier_codes = project_data.get("codes", {})
+                            if username in supplier_codes and supplier_codes[username] == password:
+                                login_success = True
+                                target_project_id = project_id
+                                break
+                        if login_success:
                             st.session_state["user_type"] = "supplier"
                             st.session_state["user"] = username
-                            st.session_state["project_id"] = project_id
-                            login_success = True
+                            st.session_state["project_id"] = target_project_id
+                            st.success("登录成功！正在跳转...")
+                            time.sleep(0.5)
                             st.rerun()
-                            break
-                    
-                    if not login_success:
-                        st.error("用户名或密码错误，请重试")
+                        else:
+                            st.markdown("""
+                                <div class="error-box">
+                                    <strong>登录失败</strong>：用户名或密码错误，请重试！
+                                </div>
+                            """, unsafe_allow_html=True)
 
-# --- 供应商端页面 ---
 def render_supplier_dashboard():
-    """渲染供应商报价页面"""
-    # 验证会话有效性
-    required_session_keys = ["user", "project_id", "user_type"]
-    for key in required_session_keys:
-        if key not in st.session_state:
-            st.error("会话已失效，请重新登录")
-            if st.button("返回登录页"):
-                st.session_state.clear()
-                st.rerun()
-            return
+    """供应商端页面（界面优化）"""
+    st.title("📤 供应商报价中心")
+    st.divider()
     
-    # 获取会话数据
+    # 验证会话
+    required_keys = ["user", "project_id", "user_type"]
+    if not all(k in st.session_state for k in required_keys):
+        st.markdown("""
+            <div class="error-box">
+                <strong>会话失效</strong>：请重新登录！
+            </div>
+        """, unsafe_allow_html=True)
+        if st.button("返回登录页", type="secondary"):
+            st.session_state.clear()
+            st.rerun()
+        return
+    
     supplier_name = st.session_state["user"]
     project_id = st.session_state["project_id"]
     project_data = global_data["projects"].get(project_id)
     
-    # 验证项目存在性
     if not project_data:
-        st.error("当前项目不存在或已被删除")
-        if st.button("返回登录页"):
-            st.session_state.clear()
-            st.rerun()
+        st.markdown("""
+            <div class="error-box">
+                <strong>项目不存在</strong>：您关联的项目已被删除！
+            </div>
+        """, unsafe_allow_html=True)
         return
     
-    # 解析截止时间
-    deadline = safe_parse_deadline(project_data.get("deadline", ""))
-    now = datetime.now()
-    is_closed = now > deadline
-    time_remaining = deadline - now if not is_closed else timedelta(0)
+    # 项目信息卡片
+    st.markdown("### 📋 项目信息")
+    with st.container():
+        st.markdown(f"""
+            <div class="card">
+                <div><strong>项目名称：</strong>{project_data['name']}</div>
+                <div><strong>报价截止时间：</strong>{project_data['deadline']}</div>
+                <div><strong>当前时间：</strong>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+            </div>
+        """, unsafe_allow_html=True)
     
-    # 页面头部信息
-    with st.container(border=True):
-        col1, col2, col3, col4, col5 = st.columns([1, 2, 1.2, 0.6, 0.6])
-        col1.markdown(f"**👤 {supplier_name}**")
-        col2.caption(f"项目：{project_data.get('name', '未知项目')}")
+    # 截止时间判断
+    deadline = safe_parse_deadline(project_data["deadline"])
+    is_closed = datetime.now() > deadline
+    if is_closed:
+        st.markdown("""
+            <div class="error-box">
+                <strong>报价已截止</strong>：该项目报价时间已结束，无法提交！
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        remaining = deadline - datetime.now()
+        hours = remaining.total_seconds() // 3600
+        minutes = (remaining.total_seconds() % 3600) // 60
+        st.markdown(f"""
+            <div class="success-box">
+                <strong>报价倒计时</strong>：剩余 {int(hours)} 小时 {int(minutes)} 分钟，请尽快提交！
+            </div>
+        """, unsafe_allow_html=True)
         
-        if is_closed:
-            col3.error("🚫 报价已截止")
-        else:
-            col3.success(f"⏳ 剩余：{str(time_remaining).split('.')[0]}")
-        
-        if col4.button("🔄 刷新", help="获取最新数据"):
-            st.rerun()
-        
-        if col5.button("退出"):
-            st.session_state.clear()
-            st.rerun()
-    
-    # 最后15分钟提醒
-    if not is_closed and timedelta(minutes=0) < time_remaining < timedelta(minutes=15):
-        st.warning("🔥 报价即将截止，请尽快提交！")
-    
-    # 获取产品列表
-    products = project_data.get("products", {})
-    if not products:
-        st.info("当前项目暂无可报价产品")
-        return
-    
-    # 初始化提交锁（防止重复提交）
-    if "submit_lock" not in st.session_state:
-        st.session_state["submit_lock"] = {}
-    
-    # 渲染产品报价表单
-    for product_name, product_info in products.items():
-        with st.container():
-            # 产品信息卡片
-            product_desc = product_info.get("desc", "")
-            desc_html = f"<span class='prod-desc'>({product_desc})</span>" if product_desc else ""
-            st.markdown(f"""
-                <div class="compact-card" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span><b>📦 {product_name}</b> {desc_html}</span>
-                    <small style='color:#666'>数量：{product_info['quantity']}</small>
-                </div>
-            """, unsafe_allow_html=True)
+        # 报价表单（界面优化）
+        st.markdown("### 📝 提交报价")
+        with st.form("quote_form", border=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                product_name = st.text_input("产品名称 *", placeholder="请输入报价产品名称")
+                quote_price = st.number_input("报价金额（元）*", min_value=0.01, step=0.01, format="%.2f")
+            with col2:
+                quote_quantity = st.number_input("报价数量 *", min_value=1, step=1)
+                quote_remark = st.text_area("报价说明", placeholder="请输入产品规格、交付周期等说明", height=100)
             
-            # 管理员提供的文件链接
-            admin_file = product_info.get("admin_file")
-            if admin_file:
-                download_link = get_simple_download_link(admin_file)
-                st.markdown(f"""
-                    <div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>
-                        {download_link}
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            # 报价表单
-            with st.form(key=f"quote_form_{product_name}", border=False):
-                fc1, fc2, fc3, fc4 = st.columns([1.5, 2, 2, 1])
-                
-                with fc1:
-                    quote_price = st.number_input(
-                        "单价",
-                        min_value=0.0,
-                        step=0.1,
-                        label_visibility="collapsed",
-                        placeholder="¥ 请输入单价"
-                    )
-                
-                with fc2:
-                    quote_remark = st.text_input(
-                        "备注",
-                        label_visibility="collapsed",
-                        placeholder="输入报价备注（选填）"
-                    ).strip()
-                
-                with fc3:
-                    quote_file = st.file_uploader(
-                        "附件",
-                        type=["pdf", "jpg", "jpeg", "png", "xlsx", "xls"],
-                        label_visibility="collapsed",
-                        key=f"file_upload_{product_name}"
-                    )
-                
-                with fc4:
-                    # 控制提交按钮状态
-                    submit_disabled = is_closed or st.session_state["submit_lock"].get(product_name, False)
-                    submit_label = "提交" if not submit_disabled else "处理中..."
-                    submit_clicked = st.form_submit_button(
-                        submit_label,
-                        use_container_width=True,
-                        disabled=submit_disabled
-                    )
-                
-                # 表单提交逻辑
-                if submit_clicked:
-                    # 加锁防止重复提交
-                    st.session_state["submit_lock"][product_name] = True
-                    
-                    try:
-                        if is_closed:
-                            st.error("❌ 报价已截止，无法提交")
-                        elif quote_price <= 0:
-                            st.error("❌ 单价必须大于0，请重新输入")
+            submit_btn = st.form_submit_button("🚀 提交报价", type="primary")
+            if submit_btn:
+                if not product_name:
+                    st.error("产品名称不能为空！")
+                else:
+                    with st.spinner("正在提交报价..."):
+                        time.sleep(1)
+                        # 保存报价（扩展：可新增报价数据存储）
+                        if "quotes" not in project_data:
+                            project_data["quotes"] = {}
+                        project_data["quotes"][supplier_name] = {
+                            "product_name": product_name,
+                            "price": float(quote_price),
+                            "quantity": int(quote_quantity),
+                            "remark": quote_remark,
+                            "submit_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        # 持久化保存
+                        if save_data(global_data):
+                            st.markdown("""
+                                <div class="success-box">
+                                    <strong>报价提交成功</strong>：您的报价已保存，可在截止前修改！
+                                </div>
+                            """, unsafe_allow_html=True)
                         else:
-                            # 处理上传文件
-                            file_data = file_to_base64(quote_file)
-                            
-                            # 检查是否为重复提交（价格+备注+文件哈希都相同）
-                            bid_history = [b for b in product_info.get("bids", []) if b.get("supplier") == supplier_name]
-                            is_duplicate = False
-                            
-                            if bid_history:
-                                last_bid = bid_history[-1]
-                                last_price = last_bid.get("price", 0)
-                                last_remark = last_bid.get("remark", "")
-                                last_file_hash = get_file_hash(last_bid.get("file"))
-                                curr_file_hash = get_file_hash(file_data)
-                                
-                                if (last_price == quote_price and
-                                    last_remark == quote_remark and
-                                    last_file_hash == curr_file_hash):
-                                    is_duplicate = True
-                            
-                            if is_duplicate:
-                                st.warning("⚠️ 报价信息未变更，已过滤重复提交")
-                            else:
-                                # 添加新报价
-                                new_bid = {
-                                    "supplier": supplier_name,
-                                    "price": quote_price,
-                                    "remark": quote_remark,
-                                    "file": file_data,
-                                    "time": now.strftime("%H:%M:%S"),
-                                    "datetime": now
-                                }
-                                
-                                # 确保bids列表存在
-                                if "bids" not in product_info:
-                                    product_info["bids"] = []
-                                
-                                product_info["bids"].append(new_bid)
-                                st.success("✅ 报价提交成功！")
-                    
-                    finally:
-                        # 解锁
-                        st.session_state["submit_lock"][product_name] = False
-                        st.rerun()
-        
-        # 分隔线
-        st.markdown("<hr style='margin: 0.1rem 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
+                            st.error("报价提交失败，请重试！")
 
-# --- 管理员端页面 ---
 def render_admin_dashboard():
-    """渲染管理员控制台（核心修复：全局变量作用域+变量初始化）"""
-    # 侧边栏菜单
-    st.sidebar.title("👮‍♂️ 管理员控制台")
+    """管理员端页面（数据持久化+界面优化）"""
+    st.title("👑 华脉招采平台管理后台")
+    st.divider()
     
-    if st.sidebar.button("🔄 刷新数据", use_container_width=True):
-        st.rerun()
-    
+    # 侧边栏菜单（界面优化）
     menu_option = st.sidebar.radio(
         "功能菜单",
-        ["项目管理", "供应商库", "监控中心"]
+        ["项目管理", "供应商库", "报价监控"],
+        index=0,
+        format_func=lambda x: f"📁 {x}" if x == "项目管理" else f"📇 {x}" if x == "供应商库" else f"📊 {x}"
     )
     
-    if st.sidebar.button("🚪 退出系统", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
-    
-    # ========== 供应商库管理 ==========
-    if menu_option == "供应商库":
-        st.subheader("🏢 供应商库管理")
+    # 1. 项目管理（核心功能+数据持久化+界面优化）
+    if menu_option == "项目管理":
+        st.markdown("### 📁 项目管理")
         
-        # 添加新供应商
-        with st.expander("➕ 新增供应商", expanded=False):
-            with st.form("add_supplier_form", border=True):
-                st.caption("基本信息")
-                col1, col2, col3 = st.columns(3)
-                
+        # 新建项目
+        with st.expander("➕ 新建项目", expanded=True):
+            with st.form("create_project_form", border=True):
+                col1, col2 = st.columns(2)
                 with col1:
-                    new_sup_name = st.text_input("供应商名称 *", placeholder="请输入企业全称").strip()
-                
+                    project_name = st.text_input("项目名称 *", placeholder="请输入项目全称")
+                    project_deadline_date = st.date_input("截止日期 *", value=datetime.now() + timedelta(days=7))
                 with col2:
-                    new_sup_contact = st.text_input("联系人", placeholder="请输入联系人姓名").strip()
+                    project_deadline_time = st.time_input("截止时间 *", value=datetime.strptime("17:00", "%H:%M").time())
+                    available_suppliers = list(global_data["suppliers"].keys())
+                    selected_suppliers = st.multiselect(
+                        "参与供应商 *",
+                        options=available_suppliers,
+                        placeholder="请选择至少一个供应商",
+                        disabled=not available_suppliers
+                    )
                 
-                with col3:
-                    new_sup_job = st.text_input("职位", placeholder="如：销售经理").strip()
-                
-                st.caption("详细信息")
-                col4, col5, col6 = st.columns(3)
-                
-                with col4:
-                    new_sup_phone = st.text_input("联系电话", placeholder="手机/座机").strip()
-                
-                with col5:
-                    new_sup_type = st.text_input("产品类型", placeholder="如：光纤光缆").strip()
-                
-                with col6:
-                    new_sup_address = st.text_input("办公地址", placeholder="详细地址").strip()
-                
-                # 提交按钮
-                if st.form_submit_button("💾 保存供应商", type="primary"):
-                    if not new_sup_name:
-                        st.error("⚠️ 供应商名称不能为空")
-                    elif new_sup_name in global_data["suppliers"]:
-                        st.error(f"⚠️ 供应商 {new_sup_name} 已存在")
-                    else:
-                        # 添加新供应商
-                        global_data["suppliers"][new_sup_name] = {
-                            "contact": new_sup_contact,
-                            "phone": new_sup_phone,
-                            "job": new_sup_job,
-                            "type": new_sup_type,
-                            "address": new_sup_address
-                        }
-                        st.success(f"✅ 供应商 {new_sup_name} 添加成功！")
-                        st.rerun()
+                create_btn = st.form_submit_button("🚀 创建项目", type="primary")
+                if create_btn:
+                    with st.spinner("正在创建项目..."):
+                        time.sleep(1)
+                        if not project_name:
+                            st.error("项目名称不能为空！")
+                        elif not available_suppliers:
+                            st.error("请先在【供应商库】添加供应商！")
+                        elif not selected_suppliers:
+                            st.error("请至少选择一个参与供应商！")
+                        else:
+                            # 生成项目数据
+                            project_id = str(uuid.uuid4())[:8]
+                            deadline_str = f"{project_deadline_date} {project_deadline_time.strftime('%H:%M')}"
+                            supplier_codes = {sup: generate_random_code() for sup in selected_suppliers}
+                            
+                            # 添加到全局数据
+                            global_data["projects"][project_id] = {
+                                "name": project_name,
+                                "deadline": deadline_str,
+                                "codes": supplier_codes,
+                                "products": {},
+                                "quotes": {}
+                            }
+                            
+                            # 持久化保存
+                            if save_data(global_data):
+                                st.markdown("""
+                                    <div class="success-box">
+                                        <strong>项目创建成功</strong>！
+                                        <br>项目ID：{}
+                                        <br>供应商账号已生成，可在供应商库查看。
+                                    </div>
+                                """.format(project_id), unsafe_allow_html=True)
+                            else:
+                                st.error("项目创建失败，请重试！")
         
-        st.markdown("---")
-        
-        # 供应商列表编辑
-        st.subheader("📋 供应商名录")
-        st.info("💡 可直接编辑表格内容，修改后点击【保存所有修改】按钮生效")
-        
-        # 确保suppliers始终是字典（核心修复）
-        suppliers_dict = global_data.get("suppliers", {})
-        if not isinstance(suppliers_dict, dict):
-            global_data["suppliers"] = {}
-            suppliers_dict = {}
-        
-        # 渲染供应商表格
-        if suppliers_dict:
-            # 转换为DataFrame（确保列完整）
-            supplier_df = pd.DataFrame.from_dict(suppliers_dict, orient="index")
-            
-            # 补充缺失列（核心修复）
-            required_columns = ["contact", "phone", "job", "type", "address"]
-            for col in required_columns:
-                if col not in supplier_df.columns:
-                    supplier_df[col] = ""
-            
-            # 重命名列
-            supplier_df.rename(
-                columns={
-                    "contact": "联系人",
-                    "phone": "联系电话",
-                    "job": "职位",
-                    "type": "产品类型",
-                    "address": "办公地址"
-                },
-                inplace=True
+        # 现有项目列表
+        st.markdown("### 📋 现有项目")
+        projects = global_data.get("projects", {})
+        if not projects:
+            st.info("暂无项目数据，点击上方「新建项目」创建第一个项目！")
+        else:
+            # 按截止时间排序
+            sorted_projects = sorted(
+                projects.items(),
+                key=lambda x: safe_parse_deadline(x[1]["deadline"]),
+                reverse=False
             )
             
-            # 可编辑表格
+            for project_id, project_data in sorted_projects:
+                with st.expander(f"📅 {project_data['name']}（截止：{project_data['deadline']}）", expanded=False):
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        st.markdown(f"""
+                            <div class="card">
+                                <div><strong>项目ID：</strong>{project_id}</div>
+                                <div><strong>参与供应商：</strong>{', '.join(project_data['codes'].keys())}</div>
+                                <div><strong>已提交报价：</strong>{len(project_data.get('quotes', {}))}/{len(project_data['codes'])}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    with col2:
+                        # 编辑按钮（预留）
+                        if st.button("编辑", key=f"edit_{project_id}", type="secondary"):
+                            st.warning("编辑功能暂未实现，敬请期待！")
+                    with col3:
+                        # 删除按钮（带确认）
+                        if st.button("删除", key=f"del_{project_id}", type="secondary"):
+                            with st.spinner("正在删除项目..."):
+                                time.sleep(0.5)
+                                del global_data["projects"][project_id]
+                                if save_data(global_data):
+                                    st.success("项目删除成功！")
+                                    st.rerun()
+                                else:
+                                    st.error("项目删除失败，请重试！")
+    
+    # 2. 供应商库（数据持久化+批量导入+界面优化）
+    elif menu_option == "供应商库":
+        st.markdown("### 📇 供应商库")
+        
+        # 批量导入（新增功能）
+        st.markdown("#### 📤 批量导入")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            uploaded_file = st.file_uploader(
+                "选择Excel/CSV文件（必填列：名称、联系人、手机号）",
+                type=["xlsx", "csv"],
+                help="Excel/CSV文件需包含：名称、联系人、手机号列"
+            )
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("清空所有供应商", type="secondary"):
+                with st.spinner("正在清空数据..."):
+                    time.sleep(0.5)
+                    global_data["suppliers"] = {}
+                    if save_data(global_data):
+                        st.success("所有供应商已清空！")
+                        st.rerun()
+        
+        # 处理导入文件
+        if uploaded_file:
+            with st.spinner("正在导入数据..."):
+                time.sleep(1)
+                try:
+                    if uploaded_file.name.endswith(".xlsx"):
+                        df = pd.read_excel(uploaded_file)
+                    else:
+                        df = pd.read_csv(uploaded_file)
+                    
+                    # 校验必填列
+                    required_cols = ["名称", "联系人", "手机号"]
+                    missing_cols = [col for col in required_cols if col not in df.columns]
+                    if missing_cols:
+                        st.markdown(f"""
+                            <div class="error-box">
+                                <strong>导入失败</strong>：文件缺少必填列：{', '.join(missing_cols)}
+                            </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        # 数据清洗
+                        df = df.dropna(subset=required_cols)
+                        df["手机号"] = df["手机号"].astype(str).str.replace("-", "").str.replace(" ", "")
+                        df = df[df["手机号"].str.len() == 11]
+                        
+                        # 导入数据
+                        imported_count = 0
+                        for idx, row in df.iterrows():
+                            sup_name = row["名称"].strip()
+                            global_data["suppliers"][sup_name] = {
+                                "contact": row["联系人"].strip(),
+                                "phone": row["手机号"],
+                                "job": row.get("职位", "").strip(),
+                                "type": row.get("类型", "").strip(),
+                                "address": row.get("地址", "").strip()
+                            }
+                            imported_count += 1
+                        
+                        # 保存数据
+                        if save_data(global_data):
+                            st.markdown(f"""
+                                <div class="success-box">
+                                    <strong>导入成功</strong>！共导入 {imported_count} 条有效供应商数据
+                                </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.error("数据导入失败，请重试！")
+                except Exception as e:
+                    st.markdown(f"""
+                        <div class="error-box">
+                            <strong>导入异常</strong>：{str(e)}
+                        </div>
+                    """, unsafe_allow_html=True)
+        
+        # 新增单个供应商
+        st.markdown("#### ➕ 新增供应商")
+        with st.form("add_supplier_form", border=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                sup_name = st.text_input("供应商名称 *", placeholder="请输入企业全称")
+                sup_contact = st.text_input("联系人 *", placeholder="请输入联系人姓名")
+                sup_phone = st.text_input("手机号 *", placeholder="请输入11位手机号")
+            with col2:
+                sup_job = st.text_input("职位", placeholder="如：销售总监")
+                sup_type = st.text_input("业务类型", placeholder="如：光纤光缆")
+                sup_address = st.text_input("地址", placeholder="请输入详细地址")
+            
+            add_btn = st.form_submit_button("保存供应商", type="primary")
+            if add_btn:
+                with st.spinner("正在保存..."):
+                    time.sleep(0.5)
+                    if not sup_name:
+                        st.error("供应商名称不能为空！")
+                    elif not sup_contact:
+                        st.error("联系人不能为空！")
+                    elif not sup_phone or len(sup_phone) != 11:
+                        st.error("请输入有效的11位手机号！")
+                    else:
+                        global_data["suppliers"][sup_name] = {
+                            "contact": sup_contact,
+                            "phone": sup_phone,
+                            "job": sup_job,
+                            "type": sup_type,
+                            "address": sup_address
+                        }
+                        if save_data(global_data):
+                            st.success("供应商添加成功！")
+                            st.rerun()
+                        else:
+                            st.error("供应商添加失败，请重试！")
+        
+        # 供应商列表
+        st.markdown("#### 📋 供应商列表")
+        suppliers = global_data.get("suppliers", {})
+        if not suppliers:
+            st.info("暂无供应商数据，点击上方「新增供应商」添加！")
+        else:
+            # 转换为DataFrame展示
+            sup_df = pd.DataFrame.from_dict(suppliers, orient="index")
+            sup_df = sup_df.reset_index().rename(columns={"index": "供应商名称"})
+            
+            # 编辑/删除操作
             edited_df = st.data_editor(
-                supplier_df,
-                use_container_width=True,
+                sup_df,
                 num_rows="dynamic",
+                disabled=["供应商名称"],  # 名称不可编辑
+                column_config={
+                    "phone": st.column_config.TextColumn("手机号", validate="^1[3-9]\\d{9}$")
+                },
                 key="supplier_editor"
             )
             
-            # 保存修改
-            if st.button("💾 保存所有修改", type="primary"):
-                # 转换回字典
-                edited_dict = edited_df.rename(
-                    columns={
-                        "联系人": "contact",
-                        "联系电话": "phone",
-                        "职位": "job",
-                        "产品类型": "type",
-                        "办公地址": "address"
-                    }
-                ).to_dict(orient="index")
-                
-                # 更新全局数据
-                global_data["suppliers"] = edited_dict
-                st.success("✅ 供应商数据更新成功！")
-                st.rerun()
-            
-            # 删除供应商
-            st.markdown("---")
-            st.subheader("🗑️ 供应商删除")
-            col_del = st.columns(4)
-            for idx, (sup_name, _) in enumerate(suppliers_dict.items()):
-                with col_del[idx % 4]:
-                    if st.button(f"删除 {sup_name}", key=f"del_sup_{sup_name}"):
-                        del global_data["suppliers"][sup_name]
-                        st.success(f"✅ 已删除供应商 {sup_name}")
-                        st.rerun()
-        else:
-            st.info("📭 暂无供应商数据，请先添加")
-    
-    # ========== 项目管理 ==========
-    elif menu_option == "项目管理":
-        st.subheader("📁 项目管理")
-        
-        # 新建项目
-        with st.expander("➕ 新建项目", expanded=False):
-            with st.form("create_project_form", border=True):
-                col1, col2, col3 = st.columns([1.5, 1, 1])
-                
-                with col1:
-                    project_name = st.text_input("项目名称 *", placeholder="请输入项目名称").strip()
-                
-                with col2:
-                    project_deadline_date = st.date_input("截止日期 *", value=datetime.now())
-                
-                with col3:
-                    project_deadline_time = st.time_input("截止时间 *", value=datetime.strptime("17:00", "%H:%M").time())
-                
-                # 供应商选择
-                available_suppliers = list(global_data["suppliers"].keys())
-                if not available_suppliers:
-                    st.error("⚠️ 请先在【供应商库】添加供应商！")
-                    selected_suppliers = []
-                else:
-                    selected_suppliers = st.multiselect(
-                        "参与报价的供应商 *",
-                        options=available_suppliers,
-                        placeholder="请选择至少一个供应商"
-                    )
-                
-                # 提交创建
-                if st.form_submit_button("🚀 创建项目", type="primary"):
-                    if not project_name:
-                        st.error("⚠️ 项目名称不能为空")
-                    elif not selected_suppliers:
-                        st.error("⚠️ 请至少选择一个供应商")
+            # 保存编辑后的数据
+            if st.button("保存修改", type="primary"):
+                with st.spinner("正在保存修改..."):
+                    time.sleep(0.5)
+                    new_suppliers = {}
+                    for idx, row in edited_df.iterrows():
+                        sup_name = row["供应商名称"]
+                        if sup_name:
+                            new_suppliers[sup_name] = {
+                                "contact": row["contact"],
+                                "phone": row["phone"],
+                                "job": row["job"],
+                                "type": row["type"],
+                                "address": row["address"]
+                            }
+                    global_data["suppliers"] = new_suppliers
+                    if save_data(global_data):
+                        st.success("供应商数据修改成功！")
                     else:
-                        # 生成项目ID和供应商验证码
-                        project_id = str(uuid.uuid4())[:8]
-                        supplier_codes = {sup: generate_random_code() for sup in selected_suppliers}
-                        deadline_str = f"{project_deadline_date} {project_deadline_time.strftime('%H:%M')}"
-                        
-                        # 创建项目
-                        global_data["projects"][project_id] = {
-                            "name": project_name,
-                            "deadline": deadline_str,
-                            "codes": supplier_codes,
-                            "products": {}
-                        }
-                        
-                        st.success(f"✅ 项目 {project_name} 创建成功！")
-                        st.rerun()
-        
-        st.markdown("---")
-        
-        # 现有项目管理
+                        st.error("供应商数据修改失败，请重试！")
+    
+    # 3. 报价监控（界面优化）
+    elif menu_option == "报价监控":
+        st.markdown("### 📊 报价监控")
         projects = global_data.get("projects", {})
         if not projects:
-            st.info("📭 暂无项目数据，请先创建")
-            return
-        
-        # 按截止时间排序
-        sorted_projects = sorted(
-            projects.items(),
-            key=lambda x: x[1]["deadline"],
-            reverse=True
-        )
-        
-        for project_id, project_data in sorted_projects:
-            with st.expander(f"📅 {project_data['deadline']} | {project_data['name']}", expanded=False):
-                # 追加供应商
-                with st.expander("➕ 追加供应商", expanded=False):
-                    with st.form(f"append_supplier_form_{project_id}", border=False):
-                        current_suppliers = list(project_data.get("codes", {}).keys())
-                        all_suppliers = list(global_data["suppliers"].keys())
-                        remaining_suppliers = [s for s in all_suppliers if s not in current_suppliers]
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            select_supplier = st.selectbox(
-                                "从库中选择",
-                                options=["--请选择--"] + remaining_suppliers,
-                                key=f"select_sup_{project_id}"
-                            )
-                        
-                        with col2:
-                            new_supplier = st.text_input("或新增供应商", placeholder="临时添加供应商名称").strip()
-                        
-                        if st.form_submit_button("✅ 确认添加"):
-                            target_supplier = None
-                            
-                            # 处理选择的供应商
-                            if select_supplier != "--请选择--":
-                                target_supplier = select_supplier
-                            
-                            # 处理新增供应商
-                            elif new_supplier:
-                                target_supplier = new_supplier
-                                # 自动添加到供应商库
-                                if target_supplier not in global_data["suppliers"]:
-                                    global_data["suppliers"][target_supplier] = {
-                                        "contact": "",
-                                        "phone": "",
-                                        "job": "",
-                                        "type": "临时追加",
-                                        "address": ""
-                                    }
-                            
-                            # 验证并添加
-                            if target_supplier:
-                                if target_supplier in current_suppliers:
-                                    st.warning(f"⚠️ 供应商 {target_supplier} 已在项目中")
-                                else:
-                                    project_data["codes"][target_supplier] = generate_random_code()
-                                    st.success(f"✅ 已添加供应商 {target_supplier}")
-                                    st.rerun()
-                            else:
-                                st.warning("⚠️ 请选择或输入供应商名称")
-                
-                # 供应商列表（含账号密码）
-                st.caption("🔑 项目供应商账号信息")
-                supplier_codes = project_data.get("codes", {})
-                
-                if supplier_codes:
-                    # 表头
-                    st.markdown("""
-                        <div style="display:flex; color:#666; font-size:0.8em; margin-bottom:5px; padding:5px; background:#f8f9fa; border-radius:4px;">
-                            <div style="flex:1.5;">供应商名称</div>
-                            <div style="flex:2;">登录用户名</div>
-                            <div style="flex:2;">登录密码</div>
-                            <div style="flex:0.8;">操作</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # 供应商列表
-                    for sup_name, sup_code in supplier_codes.items():
-                        col1, col2, col3, col4 = st.columns([1.5, 2, 2, 0.8])
-                        with col1:
-                            st.markdown(f"**{sup_name}**")
-                        with col2:
-                            st.code(sup_name, language=None)
-                        with col3:
-                            st.code(sup_code, language=None)
-                        with col4:
-                            if st.button("🗑️", key=f"rm_sup_{project_id}_{sup_name}", help="移除供应商"):
-                                del project_data["codes"][sup_name]
-                                st.success(f"✅ 已移除供应商 {sup_name}")
-                                st.rerun()
-                else:
-                    st.info("⚠️ 该项目暂无供应商")
-                
-                st.markdown("<div style='margin:10px 0;'></div>", unsafe_allow_html=True)
-                
-                # 产品管理
-                st.caption("📦 产品列表")
-                products = project_data.get("products", {})
-                
-                if products:
-                    for prod_name, prod_info in products.items():
-                        prod_desc = prod_info.get("desc", "")
-                        desc_str = f"({prod_desc})" if prod_desc else ""
-                        col1, col2 = st.columns([8, 1])
-                        
-                        with col1:
-                            st.markdown(f"""
-                                <div style='font-size:0.9em; padding:5px; border-bottom:1px solid #eee;'>
-                                    • {prod_name} {desc_str} （数量：{prod_info['quantity']}）
-                                </div>
-                            """, unsafe_allow_html=True)
-                        
-                        with col2:
-                            if st.button("✕", key=f"del_prod_{project_id}_{prod_name}", help="删除产品"):
-                                del project_data["products"][prod_name]
-                                st.success(f"✅ 已删除产品 {prod_name}")
-                                st.rerun()
-                else:
-                    st.info("📭 暂无产品，请添加")
-                
-                # 添加产品表单
-                st.caption("➕ 添加产品")
-                with st.form(f"add_product_form_{project_id}", border=False):
-                    col1, col2, col3, col4, col5 = st.columns([2, 1, 2, 2, 1])
-                    
-                    with col1:
-                        prod_name = st.text_input("产品名称 *", label_visibility="collapsed", placeholder="如：单模光缆").strip()
-                    
-                    with col2:
-                        prod_quantity = st.number_input("数量 *", min_value=1, value=1, label_visibility="collapsed")
-                    
-                    with col3:
-                        prod_desc = st.text_input("产品描述", label_visibility="collapsed", placeholder="规格/技术要求").strip()
-                    
-                    with col4:
-                        prod_file = st.file_uploader("规格文件", label_visibility="collapsed", key=f"prod_file_{project_id}")
-                    
-                    with col5:
-                        add_prod_clicked = st.form_submit_button("添加")
-                    
-                    if add_prod_clicked:
-                        if not prod_name:
-                            st.warning("⚠️ 产品名称不能为空")
-                        elif prod_name in products:
-                            st.warning(f"⚠️ 产品 {prod_name} 已存在")
-                        else:
-                            # 添加产品
-                            project_data["products"][prod_name] = {
-                                "quantity": prod_quantity,
-                                "desc": prod_desc,
-                                "bids": [],
-                                "admin_file": file_to_base64(prod_file)
-                            }
-                            st.success(f"✅ 已添加产品 {prod_name}")
-                            st.rerun()
-                
-                # 删除项目按钮
-                if st.button(f"🗑️ 删除项目：{project_data['name']}", key=f"del_proj_{project_id}", type="secondary"):
-                    del global_data["projects"][project_id]
-                    st.success(f"✅ 已删除项目 {project_data['name']}")
-                    st.rerun()
-    
-    # ========== 监控中心 ==========
-    elif menu_option == "监控中心":
-        st.subheader("📊 报价监控中心")
-        
-        # 项目选择
-        project_options = {
-            pid: f"{pdata['deadline']} - {pdata['name']}"
-            for pid, pdata in global_data["projects"].items()
-            if "deadline" in pdata and "products" in pdata
-        }
-        
-        if not project_options:
-            st.info("📭 暂无可监控的项目")
-            return
-        
-        selected_project_id = st.selectbox(
-            "选择监控项目",
-            options=list(project_options.keys()),
-            format_func=lambda x: project_options[x]
-        )
-        
-        selected_project = global_data["projects"][selected_project_id]
-        products = selected_project.get("products", {})
-        
-        # 报价汇总（核心修复：确保summary_data始终初始化）
-        st.markdown("### 🏆 报价汇总")
-        summary_data = []  # 必须先初始化（关键修复）
-        
-        for prod_name, prod_info in products.items():
-            bids = prod_info.get("bids", [])
-            valid_bids = [b for b in bids if b.get("price", 0) > 0]
-            
-            # 初始化单行数据
-            row_data = {
-                "产品名称": prod_name,
-                "数量": prod_info["quantity"],
-                "最低单价": "-",
-                "最低总价": "-",
-                "最高单价": "-",
-                "最高总价": "-",
-                "最优供应商": "-",
-                "价差幅度": "-",
-                "有效报价数": len(valid_bids)
-            }
-            
-            # 有有效报价时计算数据
-            if valid_bids:
-                prices = [b["price"] for b in valid_bids]
-                min_price = min(prices)
-                max_price = max(prices)
-                min_total = min_price * prod_info["quantity"]
-                max_total = max_price * prod_info["quantity"]
-                
-                # 最优供应商
-                best_suppliers = [b["supplier"] for b in valid_bids if b["price"] == min_price]
-                best_suppliers_str = ", ".join(set(best_suppliers))
-                
-                # 价差幅度
-                price_diff = (max_price - min_price) / min_price * 100 if min_price > 0 else 0
-                
-                # 更新行数据
-                row_data.update({
-                    "最低单价": f"¥{min_price:.2f}",
-                    "最低总价": f"¥{min_total:.2f}",
-                    "最高单价": f"¥{max_price:.2f}",
-                    "最高总价": f"¥{max_total:.2f}",
-                    "最优供应商": best_suppliers_str,
-                    "价差幅度": f"{price_diff:.1f}%"
-                })
-            
-            # 添加到汇总数据
-            summary_data.append(row_data)
-        
-        # 渲染汇总表格（核心修复：兜底空数据）
-        if not summary_data:
-            summary_df = pd.DataFrame(columns=[
-                "产品名称", "数量", "最低单价", "最低总价", 
-                "最高单价", "最高总价", "最优供应商", "价差幅度", "有效报价数"
-            ])
+            st.info("暂无项目数据，无法监控报价！")
         else:
-            summary_df = pd.DataFrame(summary_data)
-        
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
-        
-        # 导出Excel
-        st.markdown("---")
-        all_detail_data = []
-        for prod_name, prod_info in products.items():
-            for bid in prod_info.get("bids", []):
-                price = bid.get("price", 0)
-                all_detail_data.append({
-                    "项目名称": selected_project["name"],
-                    "产品名称": prod_name,
-                    "数量": prod_info["quantity"],
-                    "供应商": bid.get("supplier", ""),
-                    "单价(¥)": f"{price:.2f}",
-                    "总价(¥)": f"{price * prod_info['quantity']:.2f}",
-                    "备注": bid.get("remark", ""),
-                    "报价时间": bid.get("time", ""),
-                    "附件状态": "有" if bid.get("file") else "无"
-                })
-        
-        if all_detail_data:
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                summary_df.to_excel(writer, sheet_name="报价汇总", index=False)
-                pd.DataFrame(all_detail_data).to_excel(writer, sheet_name="报价明细", index=False)
-            
-            st.download_button(
-                label="📥 导出Excel报表",
-                data=output.getvalue(),
-                file_name=f"华脉招采-{selected_project['name']}-报价报表.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary"
+            # 选择项目
+            project_names = {p_id: p_data["name"] for p_id, p_data in projects.items()}
+            selected_project_id = st.selectbox(
+                "选择监控项目",
+                options=list(project_names.keys()),
+                format_func=lambda x: project_names[x]
             )
-        
-        # 详细报价分析
-        st.markdown("---")
-        st.markdown("### 📈 产品报价详情")
-        
-        for prod_name, prod_info in products.items():
-            st.markdown(f"#### 📦 {prod_name}（数量：{prod_info['quantity']}）")
+            project_data = projects[selected_project_id]
             
-            bids = prod_info.get("bids", [])
-            if not bids:
-                st.info("暂无报价数据")
-                st.divider()
-                continue
+            # 报价统计
+            st.markdown("#### 📈 报价统计")
+            quotes = project_data.get("quotes", {})
+            total_suppliers = len(project_data["codes"])
+            submitted_suppliers = len(quotes)
             
-            # 准备图表和表格数据
-            chart_data = []
-            table_data = []
-            
-            for bid in bids:
-                bid_time = bid.get("datetime", datetime.now())
-                supplier = bid.get("supplier", "未知")
-                price = bid.get("price", 0)
-                total = price * prod_info["quantity"]
-                
-                chart_data.append({
-                    "时间": bid_time,
-                    "单价(¥)": price,
-                    "供应商": supplier
-                })
-                
-                table_data.append({
-                    "供应商": supplier,
-                    "单价(¥)": f"{price:.2f}",
-                    "总价(¥)": f"{total:.2f}",
-                    "报价时间": bid.get("time", ""),
-                    "备注": bid.get("remark", ""),
-                    "附件": "✅" if bid.get("file") else "❌"
-                })
-            
-            # 双列布局：图表 + 表格
-            col1, col2 = st.columns(2)
-            
+            col1, col2, col3 = st.columns(3)
             with col1:
-                st.line_chart(
-                    pd.DataFrame(chart_data),
-                    x="时间",
-                    y="单价(¥)",
-                    color="供应商",
-                    height=250,
+                st.metric("项目名称", project_data["name"])
+            with col2:
+                st.metric("应提交供应商", total_suppliers)
+            with col3:
+                st.metric("已提交供应商", submitted_suppliers)
+            
+            # 报价详情
+            st.markdown("#### 📋 报价详情")
+            if not quotes:
+                st.info("暂无供应商提交报价！")
+            else:
+                # 转换为DataFrame展示
+                quote_df = pd.DataFrame.from_dict(quotes, orient="index")
+                quote_df = quote_df.reset_index().rename(columns={"index": "供应商名称"})
+                st.dataframe(
+                    quote_df,
+                    column_config={
+                        "price": st.column_config.NumberColumn("报价金额（元）", format="%.2f"),
+                        "quantity": st.column_config.NumberColumn("报价数量"),
+                        "submit_time": st.column_config.DatetimeColumn("提交时间")
+                    },
                     use_container_width=True
                 )
-            
-            with col2:
-                st.dataframe(
-                    table_data,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=250
+                
+                # 导出报价数据
+                csv_data = quote_df.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button(
+                    label="📥 导出报价数据",
+                    data=csv_data,
+                    file_name=f"{project_data['name']}_报价数据_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    type="primary"
                 )
-            
-            # 附件下载
-            file_tags = []
-            for bid in bids:
-                if bid.get("file"):
-                    file_tag = get_styled_download_tag(bid["file"], bid["supplier"])
-                    if file_tag:
-                        file_tags.append(file_tag)
-            
-            if file_tags:
-                st.markdown("##### 📎 供应商附件")
-                st.markdown("".join(file_tags), unsafe_allow_html=True)
-            
-            st.divider()
 
 # --- 主程序入口 ---
 def main():
-    """主程序入口"""
-    # 检查会话状态
-    if "user" not in st.session_state:
+    # 初始化会话状态
+    if "user_type" not in st.session_state:
         render_login_page()
     else:
-        user_type = st.session_state.get("user_type")
-        if user_type == "admin":
-            render_admin_dashboard()
-        elif user_type == "supplier":
-            render_supplier_dashboard()
-        else:
+        if st.sidebar.button("🔚 退出登录", type="secondary"):
             st.session_state.clear()
             st.rerun()
+        
+        if st.session_state["user_type"] == "admin":
+            render_admin_dashboard()
+        elif st.session_state["user_type"] == "supplier":
+            render_supplier_dashboard()
 
 if __name__ == "__main__":
     main()
