@@ -96,7 +96,9 @@ def get_styled_download_tag(file_dict, supplier_name=""):
 def get_simple_download_link(file_dict, label="📄"):
     if not file_dict: return ""
     b64 = file_dict["data"]
-    return f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{label} 规格书</a>'
+    # --- 修改点：这里增加了“（华脉提供资料）”字样 ---
+    display_text = f"{label} （华脉提供资料）: {file_dict['name']}"
+    return f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{display_text}</a>'
 
 # --- 登录页面 ---
 def login_page():
@@ -151,6 +153,7 @@ def supplier_dashboard():
             </div>
             """, unsafe_allow_html=True)
             
+            # 这里调用修改后的函数，显示“（华脉提供资料）”
             link = get_simple_download_link(pinfo.get('admin_file'))
             if link: st.markdown(f"<div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>{link}</div>", unsafe_allow_html=True)
 
@@ -215,7 +218,7 @@ def admin_dashboard():
                     cols = st.columns(4)
                     for i, (sup, code) in enumerate(p['codes'].items()):
                         with cols[i % 4]:
-                            # --- 修复点：用户名也改为 code 格式，方便复制 ---
+                            # --- 确保这里使用 st.code 以支持复制 ---
                             st.code(sup, language=None)
                             st.code(code, language=None)
                 st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
