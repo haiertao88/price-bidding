@@ -13,7 +13,6 @@ st.set_page_config(page_title="华脉招采平台", layout="wide")
 # --- 🎨 CSS 样式深度定制 ---
 st.markdown("""
     <style>
-        /* 基础布局优化 */
         .block-container {
             padding-top: 4rem !important;
             padding-bottom: 1rem !important;
@@ -21,17 +20,11 @@ st.markdown("""
             padding-right: 1rem !important;
         }
         div[data-testid="stVerticalBlock"] > div { gap: 0.3rem !important; }
-        
-        /* 复制框样式修复 */
         .stCode { font-size: 0.9em !important; margin-bottom: 0px !important; }
         div[data-testid="stCodeBlock"] > pre { padding: 0.4rem !important; border-radius: 4px !important; }
-
-        /* 文件上传框压缩 */
         section[data-testid="stFileUploader"] { padding: 0px !important; min-height: 0px !important; }
         section[data-testid="stFileUploader"] > div { padding-top: 5px !important; padding-bottom: 5px !important; }
         section[data-testid="stFileUploader"] small { display: none; }
-
-        /* 上传组件汉化 */
         [data-testid="stFileUploaderDropzoneInstructions"] > div:first-child { display: none; }
         [data-testid="stFileUploaderDropzoneInstructions"] > div:nth-child(2) small { display: none; }
         [data-testid="stFileUploader"] button { color: transparent !important; position: relative; min-width: 80px !important; }
@@ -46,15 +39,9 @@ st.markdown("""
             font-size: 13px; color: #888; pointer-events: none; z-index: 1;
         }
         section[data-testid="stFileUploader"] > div { justify-content: flex-end; }
-
-        /* 卡片与表格 */
         .compact-card { border: 1px solid #eee; background-color: #fcfcfc; padding: 8px 12px; border-radius: 6px; margin-bottom: 2px; }
         .stDataFrame { font-size: 0.85rem; }
-        
-        /* 产品描述文字 */
         .prod-desc { font-size: 0.85em; color: #666; margin-left: 5px; font-style: italic;}
-
-        /* 附件下载胶囊 */
         .file-tag {
             display: inline-block; background-color: #f0f2f6; color: #31333F;
             padding: 4px 10px; border-radius: 15px; border: 1px solid #dce0e6;
@@ -62,8 +49,6 @@ st.markdown("""
             font-size: 0.85rem; transition: all 0.2s;
         }
         .file-tag:hover { background-color: #e0e4eb; border-color: #cdd3dd; color: #0068c9; }
-        
-        /* 供应商标签样式 */
         .sup-badge {
             display: inline-block; padding: 2px 8px; border-radius: 4px;
             background-color: #e6f3ff; color: #0068c9; border: 1px solid #cce5ff;
@@ -214,8 +199,8 @@ def supplier_dashboard():
 
 # --- 管理员界面 ---
 def admin_dashboard():
-    # 🔥🔥🔥 关键修复：申明使用全局变量，防止 UnboundLocalError 🔥🔥🔥
-    global shared_data 
+    # 修复 UnboundLocalError 的关键点：声明全局变量
+    global shared_data
     
     st.sidebar.title("👮‍♂️ 总控")
     if st.sidebar.button("🔄 刷新数据", use_container_width=True): st.rerun()
@@ -255,10 +240,8 @@ def admin_dashboard():
             edited_df = st.data_editor(df_source, column_config={"contact": "联系人", "job": "职位", "phone": "电话", "type": "产品类型", "address": "地址"}, use_container_width=True, key="sup_editor")
             
             if st.button("💾 保存所有修改", type="primary"):
-                # 这里会写入 shared_data，有了 global 声明就不会报错了
                 shared_data["suppliers"] = edited_df.to_dict(orient='index')
                 st.toast("✅ 更新成功", icon="🎉"); st.rerun()
-                
             st.divider()
             for name in list(shared_data["suppliers"].keys()):
                  with st.container():
@@ -321,7 +304,6 @@ def admin_dashboard():
                 # 供应商授权列表 (支持删除)
                 st.caption("🔑 供应商管理 (点击红色垃圾桶移除)")
                 if p['codes']:
-                    # 遍历并显示，增加删除按钮
                     for sup, code in list(p['codes'].items()):
                         c_code, c_del = st.columns([5, 1])
                         with c_code:
@@ -336,15 +318,75 @@ def admin_dashboard():
                 st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
                 st.caption("📦 产品管理")
                 for k, v in p['products'].items():
-                    # 显示描述
                     desc_str = f"({v.get('desc')})" if v.get('desc') else ""
                     rc1, rc2 = st.columns([8, 1])
                     rc1.markdown(f"<div style='font-size:0.9em;'>• {k} {desc_str} (x{v['quantity']})</div>", unsafe_allow_html=True)
                     if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
                         del p['products'][k]; st.rerun()
                 
-                # 添加产品 (含描述字段)
+                # 添加产品 (修复了这里的语法错误)
                 with st.form(f"add_{pid}", border=False):
                     ac1, ac2, ac3, ac4, ac5 = st.columns([2, 1, 2, 2, 1])
                     pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
-                    pq = ac2.number_input("数量", min_value=1,
+                    pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed")
+                    pd = ac3.text_input("描述", label_visibility="collapsed", placeholder="描述:规格/技术要求")
+                    pf = ac4.file_uploader("规格", label_visibility="collapsed", key=f"f_{pid}")
+                    if ac5.form_submit_button("添加"):
+                        if pn and pn not in p['products']:
+                            p['products'][pn] = {"quantity": pq, "desc": pd, "bids": [], "admin_file": file_to_base64(pf)}
+                            st.rerun()
+                if st.button("🗑️ 删除该项目", key=f"del_{pid}"): del shared_data["projects"][pid]; st.rerun()
+
+    elif menu == "监控中心":
+        st.subheader("📊 监控中心")
+        opts = {k: f"{v['deadline']} - {v['name']}" for k, v in shared_data["projects"].items() if 'deadline' in v}
+        if not opts: st.warning("无数据"); return
+        sel = st.selectbox("选择项目", list(opts.keys()), format_func=lambda x: opts[x])
+        proj = shared_data["projects"][sel]
+
+        st.markdown("##### 🏆 比价总览")
+        summ = []
+        for pn, pi in proj['products'].items():
+            bids = pi['bids']
+            if bids:
+                prices = [b['price'] for b in bids]
+                mn, mx = min(prices), max(prices)
+                best = ", ".join(set([b['supplier'] for b in bids if b['price'] == mn]))
+                diff = (mx - mn) / mn * 100 if mn > 0 else 0
+                summ.append({"产品": pn, "数量": pi['quantity'], "最低": f"¥{mn}", "最优": best, "最高": f"¥{mx}", "价差": f"{diff:.1f}%", "报价数": len(bids)})
+            else:
+                summ.append({"产品": pn, "数量": pi['quantity'], "最低": "-", "最优": "-", "最高": "-", "价差": "-", "报价数": 0})
+        st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True)
+
+        all_d = []
+        for pn, pi in proj['products'].items():
+            for b in pi['bids']:
+                all_d.append({"产品": pn, "数量": pi['quantity'], "供应商": b['supplier'], "单价": b['price'], "总价": b['price']*pi['quantity'], "备注": b['remark'], "时间": b['time']})
+        if all_d:
+            out = io.BytesIO()
+            with pd.ExcelWriter(out) as writer: pd.DataFrame(all_d).to_excel(writer, index=False)
+            st.download_button("📥 导出Excel", out.getvalue(), "报价明细.xlsx")
+
+        st.markdown("---")
+        for pn, pi in proj['products'].items():
+            with st.container():
+                st.markdown(f"**📦 {pn}**")
+                if pi['bids']:
+                    df = pd.DataFrame(pi['bids'])
+                    c1, c2 = st.columns([1, 1.5])
+                    c1.line_chart(df[['datetime','price','supplier']], x='datetime', y='price', color='supplier', height=180)
+                    show_df = df[['supplier','price','remark','time']].copy()
+                    show_df['附件状态'] = ["✅" if b['file'] else "" for b in pi['bids']]
+                    show_df.columns = ['供应商', '单价', '备注', '时间', '附件状态']
+                    c2.dataframe(show_df, use_container_width=True, hide_index=True, height=180)
+                    file_tags = [get_styled_download_tag(b['file'], b['supplier']) for b in pi['bids'] if b['file']]
+                    if file_tags:
+                        st.caption("📎 附件下载:")
+                        st.markdown("".join(file_tags), unsafe_allow_html=True)
+                else: st.caption("暂无报价")
+                st.divider()
+
+if 'user' not in st.session_state: login_page()
+else:
+    if st.session_state.user_type == "admin": admin_dashboard()
+    else: supplier_dashboard()
