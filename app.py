@@ -1,276 +1,361 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-from datetime import datetime
-import time
+import io
+import random
+import string
+import uuid
+import base64
+from datetime import datetime, timedelta
 
-# ==========================================
-# 1. 数据库配置与初始化函数
-# ==========================================
-DB_FILE = 'procurement.db'
+# --- 页面配置 ---
+st.set_page_config(page_title="华脉招采平台", layout="wide")
 
-def init_db():
-    """初始化数据库表结构和测试数据"""
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    
-    # 创建表：供应商
-    c.execute('''CREATE TABLE IF NOT EXISTS suppliers
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  username TEXT UNIQUE, 
-                  password TEXT, 
-                  name TEXT, 
-                  category TEXT)''')
-    
-    # 创建表：询价项目
-    c.execute('''CREATE TABLE IF NOT EXISTS inquiries
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  title TEXT, 
-                  details TEXT,
-                  project_password TEXT, 
-                  create_date TEXT, 
-                  deadline TEXT, 
-                  status TEXT)''')
-    
-    # 创建表：报价记录
-    c.execute('''CREATE TABLE IF NOT EXISTS quotes
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  inquiry_id INTEGER, 
-                  supplier_username TEXT, 
-                  price REAL, 
-                  delivery_days INTEGER, 
-                  remarks TEXT,
-                  timestamp TEXT)''')
+# --- 🎨 CSS 样式深度定制 ---
+st.markdown("""
+    <style>
+        /* 基础布局优化 */
+        .block-container {
+            padding-top: 4rem !important;
+            padding-bottom: 1rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        div[data-testid="stVerticalBlock"] > div { gap: 0.3rem !important; }
+        
+        /* 复制框样式修复 */
+        .stCode { font-size: 0.9em !important; margin-bottom: 0px !important; }
+        div[data-testid="stCodeBlock"] > pre { padding: 0.4rem !important; border-radius: 4px !important; }
 
-    # --- 预埋测试数据 ---
-    # 检查是否已有供应商，没有则插入您指定的供应商账号
-    c.execute("SELECT count(*) FROM suppliers")
-    if c.fetchone()[0] == 0:
-        suppliers_data = [
-            ('GYSA', '123456', '供应商A (线缆)', '优质'),
-            ('GYSB', '123456', '供应商B (连接器)', '普通'),
-            ('GYSC', '123456', '供应商C (机柜)', '优质')
-        ]
-        c.executemany("INSERT INTO suppliers (username, password, name, category) VALUES (?,?,?,?)", suppliers_data)
-        print("已初始化供应商数据")
+        /* 文件上传框压缩 */
+        section[data-testid="stFileUploader"] { padding: 0px !important; min-height: 0px !important; }
+        section[data-testid="stFileUploader"] > div { padding-top: 5px !important; padding-bottom: 5px !important; }
+        section[data-testid="stFileUploader"] small { display: none; }
 
-    conn.commit()
-    conn.close()
+        /* 上传组件汉化 */
+        [data-testid="stFileUploaderDropzoneInstructions"] > div:first-child { display: none; }
+        [data-testid="stFileUploaderDropzoneInstructions"] > div:nth-child(2) small { display: none; }
+        [data-testid="stFileUploader"] button { color: transparent !important; position: relative; min-width: 80px !important; }
+        [data-testid="stFileUploader"] button::after {
+            content: "📂 选择文件"; color: #31333F; position: absolute;
+            left: 50%; top: 50%; transform: translate(-50%, -50%);
+            font-size: 14px; white-space: nowrap;
+        }
+        section[data-testid="stFileUploader"] > div > div::before {
+            content: "拖拽文件到此处 / 单个限制 200MB"; position: absolute;
+            left: 10px; top: 50%; transform: translateY(-50%);
+            font-size: 13px; color: #888; pointer-events: none; z-index: 1;
+        }
+        section[data-testid="stFileUploader"] > div { justify-content: flex-end; }
 
-# 执行初始化
-init_db()
+        /* 卡片与表格 */
+        .compact-card { border: 1px solid #eee; background-color: #fcfcfc; padding: 8px 12px; border-radius: 6px; margin-bottom: 2px; }
+        .stDataFrame { font-size: 0.85rem; }
 
-# ==========================================
-# 2. 数据库操作通用函数
-# ==========================================
-def run_query(query, params=(), fetch=False):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(query, params)
-    if fetch:
-        data = c.fetchall()
-        columns = [description[0] for description in c.description]
-        conn.close()
-        return pd.DataFrame(data, columns=columns)
-    else:
-        conn.commit()
-        conn.close()
-        return None
+        /* 附件下载胶囊 */
+        .file-tag {
+            display: inline-block; background-color: #f0f2f6; color: #31333F;
+            padding: 4px 10px; border-radius: 15px; border: 1px solid #dce0e6;
+            margin-right: 8px; margin-bottom: 8px; text-decoration: none;
+            font-size: 0.85rem; transition: all 0.2s;
+        }
+        .file-tag:hover { background-color: #e0e4eb; border-color: #cdd3dd; color: #0068c9; }
+        
+        /* 供应商标签样式 */
+        .sup-badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            background-color: #e6f3ff; color: #0068c9; border: 1px solid #cce5ff;
+            font-size: 0.85rem; margin-right: 5px; margin-bottom: 5px;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
-# ==========================================
-# 3. 界面逻辑：登录页
-# ==========================================
+# --- 全局数据 ---
+@st.cache_resource
+def get_global_data():
+    return { 
+        "projects": {},
+        # 初始化默认供应商库
+        "suppliers": ["GYSA", "GYSB", "GYSC", "江苏通信", "南京华脉"] 
+    }
+shared_data = get_global_data()
+
+# 清洗旧数据
+invalid_pids = []
+for pid, data in shared_data["projects"].items():
+    if 'deadline' not in data: invalid_pids.append(pid)
+for pid in invalid_pids: del shared_data["projects"][pid]
+# 确保供应商列表存在
+if "suppliers" not in shared_data:
+    shared_data["suppliers"] = ["GYSA", "GYSB", "GYSC"]
+
+# --- 工具函数 ---
+def generate_random_code(length=6):
+    return ''.join(random.choices(string.digits, k=length))
+
+def file_to_base64(uploaded_file):
+    if uploaded_file is None: return None
+    try:
+        bytes_data = uploaded_file.getvalue()
+        b64 = base64.b64encode(bytes_data).decode()
+        return {"name": uploaded_file.name, "type": uploaded_file.type, "data": b64}
+    except Exception as e: return None
+
+def get_styled_download_tag(file_dict, supplier_name=""):
+    if not file_dict: return ""
+    b64 = file_dict["data"]
+    label = f"📎 {supplier_name} - {file_dict['name']}" if supplier_name else f"📎 {file_dict['name']}"
+    href = f"""<a href="data:{file_dict['type']};base64,{b64}" download="{file_dict['name']}" class="file-tag" target="_blank">{label}</a>"""
+    return href
+
+def get_simple_download_link(file_dict, label="📄"):
+    if not file_dict: return ""
+    b64 = file_dict["data"]
+    display_text = f"{label} （华脉提供资料）: {file_dict['name']}"
+    return f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{display_text}</a>'
+
+# --- 登录页面 ---
 def login_page():
-    st.markdown("<h1 style='text-align: center;'>供应链询价管理系统</h1>", unsafe_allow_html=True)
-    st.write("---")
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+    st.markdown("<h3 style='text-align: center; margin-bottom: 1rem;'>🔐 华脉招采平台</h3>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 1.5, 1])
+    with c2:
         with st.container(border=True):
-            st.subheader("🔐 系统登录")
-            role = st.selectbox("选择角色", ["甲方管理员", "供应商"])
-            username = st.text_input("用户名")
-            password = st.text_input("密码", type="password")
-            
-            if st.button("登录", use_container_width=True):
-                # 甲方登录逻辑 (硬编码校验)
-                if role == "甲方管理员":
-                    if username == "HUAMAI" and password == "HUAMAI888":
-                        st.session_state.logged_in = True
-                        st.session_state.role = "Admin"
-                        st.session_state.username = username
-                        st.success("登录成功！")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.error("管理员账号或密码错误")
-                
-                # 供应商登录逻辑 (查库校验)
-                elif role == "供应商":
-                    df = run_query("SELECT * FROM suppliers WHERE username=? AND password=?", (username, password), fetch=True)
-                    if not df.empty:
-                        st.session_state.logged_in = True
-                        st.session_state.role = "Supplier"
-                        st.session_state.username = username
-                        st.session_state.supplier_name = df.iloc[0]['name']
-                        st.success(f"欢迎回来，{df.iloc[0]['name']}")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.error("供应商账号或密码错误")
+            u = st.text_input("用户名", label_visibility="collapsed", placeholder="用户名").strip()
+            p = st.text_input("密码", type="password", label_visibility="collapsed", placeholder="密码/通行码").strip()
+            if st.button("登录", type="primary", use_container_width=True):
+                if u == "HUAMAI" and p == "HUAMAI888":
+                    st.session_state.user_type = "admin"; st.session_state.user = u; st.rerun()
+                else:
+                    found = False
+                    for pid, d in shared_data["projects"].items():
+                        if u in d["codes"] and d["codes"][u] == p:
+                            st.session_state.user_type = "supplier"; st.session_state.user = u; st.session_state.project_id = pid
+                            st.rerun(); found = True; break
+                    if not found: st.error("验证失败")
 
-# ==========================================
-# 4. 界面逻辑：甲方管理员后台
-# ==========================================
-def admin_dashboard():
-    st.sidebar.header(f"👤 管理员: {st.session_state.username}")
-    menu = st.sidebar.radio("功能导航", ["发布询价", "报价比对", "供应商列表"])
-    
-    if st.sidebar.button("退出登录"):
-        st.session_state.logged_in = False
-        st.rerun()
-
-    # --- 模块：发布询价 ---
-    if menu == "发布询价":
-        st.header("📄 发布新的询价项目")
-        with st.form("create_inquiry"):
-            col1, col2 = st.columns(2)
-            with col1:
-                title = st.text_input("项目标题", placeholder="例如：2025年光纤采购项目")
-            with col2:
-                pwd = st.text_input("设置项目访问密码", placeholder="供应商需凭此码报价")
-            
-            details = st.text_area("采购需求详情", placeholder="请输入具体的规格型号、数量要求...")
-            deadline = st.date_input("截止日期")
-            
-            submitted = st.form_submit_button("立即发布")
-            if submitted and title and pwd:
-                run_query("INSERT INTO inquiries (title, details, project_password, create_date, deadline, status) VALUES (?, ?, ?, ?, ?, ?)",
-                          (title, details, pwd, datetime.now().strftime("%Y-%m-%d"), str(deadline), "进行中"))
-                st.success("✅ 项目发布成功！")
-    
-    # --- 模块：报价比对 ---
-    elif menu == "报价比对":
-        st.header("📊 报价比对分析")
-        
-        # 获取所有项目
-        projects = run_query("SELECT * FROM inquiries", fetch=True)
-        if projects.empty:
-            st.info("暂无询价项目")
-        else:
-            selected_project_title = st.selectbox("选择要查看的项目", projects['title'])
-            project_id = projects[projects['title'] == selected_project_title]['id'].values[0]
-            
-            # 获取该项目的报价
-            quotes = run_query("SELECT * FROM quotes WHERE inquiry_id=?", (int(project_id),), fetch=True)
-            
-            if quotes.empty:
-                st.warning("该项目暂无供应商报价。")
-            else:
-                st.subheader("报价明细表")
-                st.dataframe(quotes[['supplier_username', 'price', 'delivery_days', 'remarks', 'timestamp']], use_container_width=True)
-                
-                # 可视化对比
-                st.subheader("价格趋势对比")
-                st.bar_chart(data=quotes, x='supplier_username', y='price')
-                
-                # 最低价推荐
-                min_price = quotes['price'].min()
-                best_supplier = quotes[quotes['price'] == min_price].iloc[0]['supplier_username']
-                st.success(f"💡 最低报价供应商：**{best_supplier}**，价格：¥{min_price}")
-
-    # --- 模块：供应商列表 ---
-    elif menu == "供应商列表":
-        st.header("🏢 注册供应商库")
-        df = run_query("SELECT id, username, name, category FROM suppliers", fetch=True)
-        st.dataframe(df, use_container_width=True)
-
-# ==========================================
-# 5. 界面逻辑：供应商后台
-# ==========================================
+# --- 供应商界面 ---
 def supplier_dashboard():
-    st.sidebar.header(f"🏢 供应商: {st.session_state.username}")
-    st.sidebar.text(f"({st.session_state.get('supplier_name', '')})")
+    user = st.session_state.user
+    pid = st.session_state.project_id
+    proj = shared_data["projects"].get(pid)
+    if not proj: st.error("项目不存在"); return
     
-    if st.sidebar.button("退出登录"):
-        st.session_state.logged_in = False
-        st.rerun()
+    try: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M")
+    except: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M:%S")
 
-    st.header("📝 在线报价中心")
-    
-    # 获取所有进行中的项目
-    projects = run_query("SELECT * FROM inquiries WHERE status='进行中'", fetch=True)
-    
-    if projects.empty:
-        st.info("当前没有正在进行的询价项目。")
-        return
+    now = datetime.now()
+    closed = now > deadline
+    left = deadline - now
 
-    # 选择项目
-    project_options = {row['title']: row for index, row in projects.iterrows()}
-    selected_title = st.selectbox("请选择要报价的项目", list(project_options.keys()))
+    with st.container(border=True):
+        c1, c2, c3, c4, c5 = st.columns([1, 2, 1.2, 0.6, 0.6])
+        c1.markdown(f"**👤 {user}**")
+        c2.caption(f"项目: {proj['name']}")
+        if closed: c3.error("🚫 已截止")
+        else: c3.success(f"⏳ 剩余: {str(left).split('.')[0]}")
+        if c4.button("🔄 刷新", help="获取最新数据"): st.rerun()
+        if c5.button("退出"): st.session_state.clear(); st.rerun()
+
+    products = proj["products"]
+    if not products: st.info("暂无产品"); return
+    if not closed and timedelta(minutes=0) < left < timedelta(minutes=15): st.warning("🔥 竞价最后阶段！")
+
+    for pname, pinfo in products.items():
+        with st.container():
+            st.markdown(f"""
+            <div class="compact-card" style="display:flex; justify-content:space-between; align-items:center;">
+                <span><b>📦 {pname}</b> <small style='color:#666'>x{pinfo['quantity']}</small></span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            link = get_simple_download_link(pinfo.get('admin_file'))
+            if link: st.markdown(f"<div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>{link}</div>", unsafe_allow_html=True)
+
+            with st.form(key=f"f_{pname}", border=False):
+                fc1, fc2, fc3, fc4 = st.columns([1.5, 2, 2, 1])
+                with fc1: price = st.number_input("单价", min_value=0.0, step=0.1, label_visibility="collapsed", placeholder="¥单价")
+                with fc2: remark = st.text_input("备注", label_visibility="collapsed", placeholder="备注")
+                with fc3: sup_file = st.file_uploader("附件", type=['pdf','jpg','xlsx'], label_visibility="collapsed", key=f"u_{pname}")
+                with fc4: 
+                    submitted = st.form_submit_button("提交", use_container_width=True)
+                    if submitted:
+                        if not closed:
+                            if price > 0:
+                                fdata = file_to_base64(sup_file)
+                                # 防重复提交逻辑
+                                my_history = [b for b in pinfo['bids'] if b['supplier'] == user]
+                                is_duplicate = False
+                                if my_history:
+                                    last_bid = my_history[-1]
+                                    last_fname = last_bid['file']['name'] if last_bid['file'] else None
+                                    curr_fname = fdata['name'] if fdata else None
+                                    if (last_bid['price'] == price and last_bid['remark'] == remark and last_fname == curr_fname):
+                                        is_duplicate = True
+                                
+                                if is_duplicate:
+                                    st.toast("⚠️ 报价未变更，已过滤重复提交", icon="🛡️")
+                                else:
+                                    pinfo['bids'].append({'supplier': user, 'price': price, 'remark': remark, 'file': fdata, 'time': now.strftime('%H:%M:%S'), 'datetime': now})
+                                    st.toast("✅ 报价成功", icon="🎉")
+                            else: st.toast("❌ 价格无效", icon="🚫")
+                        else: st.error("已截止")
+            st.markdown("<hr style='margin: 0.1rem 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
+
+# --- 管理员界面 ---
+def admin_dashboard():
+    st.sidebar.title("👮‍♂️ 总控")
+    if st.sidebar.button("🔄 刷新数据", use_container_width=True): st.rerun()
     
-    selected_row = project_options[selected_title]
+    # 增加“供应商库”菜单
+    menu = st.sidebar.radio("菜单", ["项目管理", "供应商库", "监控中心"])
     
-    st.info(f"📅 截止日期: {selected_row['deadline']}")
-    
-    # 密码验证区域
-    with st.expander("点击展开报价区域", expanded=True):
-        input_pwd = st.text_input("请输入甲方提供的【项目密码】以查看详情", type="password")
+    if st.sidebar.button("退出系统"): st.session_state.clear(); st.rerun()
+
+    # === 供应商库管理 ===
+    if menu == "供应商库":
+        st.subheader("🏢 供应商管理")
         
-        if input_pwd == selected_row['project_password']:
-            st.divider()
-            st.markdown("### 📋 采购需求详情")
-            st.write(selected_row['details'])
-            
-            st.divider()
-            st.markdown("### 💰 提交您的报价")
-            
-            # 检查是否已经报过价
-            existing_quote = run_query("SELECT * FROM quotes WHERE inquiry_id=? AND supplier_username=?", 
-                                      (selected_row['id'], st.session_state.username), fetch=True)
-            
-            if not existing_quote.empty:
-                st.warning(f"您已对此项目报价：¥{existing_quote.iloc[0]['price']}。再次提交将覆盖旧报价。")
+        # 添加新供应商
+        with st.container(border=True):
+            c1, c2 = st.columns([3, 1])
+            new_sup = c1.text_input("新增供应商名称", label_visibility="collapsed", placeholder="请输入供应商全称")
+            if c2.button("➕ 添加", use_container_width=True):
+                if new_sup:
+                    if new_sup not in shared_data["suppliers"]:
+                        shared_data["suppliers"].append(new_sup)
+                        st.toast(f"已添加: {new_sup}")
+                        st.rerun()
+                    else:
+                        st.warning("该供应商已存在")
 
-            with st.form("submit_quote"):
-                price = st.number_input("总价/单价 (RMB)", min_value=0.0, step=100.0)
-                delivery = st.number_input("预计交货期 (天)", min_value=1, step=1)
-                remarks = st.text_area("备注 (付款条件/质保等)")
+        st.caption("现有供应商列表:")
+        
+        # 显示列表（紧凑布局）
+        if shared_data["suppliers"]:
+            for i, sup in enumerate(shared_data["suppliers"]):
+                with st.container():
+                    c_name, c_del = st.columns([5, 1])
+                    c_name.markdown(f"<div class='sup-badge'>🏢 {sup}</div>", unsafe_allow_html=True)
+                    # 避免删光
+                    if c_del.button("删", key=f"del_sup_{i}"):
+                        shared_data["suppliers"].remove(sup)
+                        st.rerun()
+        else:
+            st.info("暂无供应商，请添加。")
+
+
+    # === 项目管理 ===
+    elif menu == "项目管理":
+        st.subheader("📁 项目管理")
+        with st.expander("➕ 新建项目", expanded=False):
+            with st.form("new"):
+                c1, c2, c3 = st.columns([1.5, 1, 1])
+                n = c1.text_input("名称", placeholder="项目名", label_visibility="collapsed")
+                d = c2.date_input("日期", datetime.now(), label_visibility="collapsed")
+                t = c3.time_input("时间", datetime.strptime("17:00", "%H:%M").time(), label_visibility="collapsed")
                 
-                submitted = st.form_submit_button("确认提交报价")
+                # --- 修改点：改为从供应商库选择 ---
+                # 检查是否有供应商
+                available_sups = shared_data.get("suppliers", [])
+                if not available_sups:
+                    st.error("请先在【供应商库】添加供应商！")
+                    selected_sups = []
+                else:
+                    selected_sups = st.multiselect("选择供应商", available_sups, placeholder="请选择参与报价的供应商")
                 
-                if submitted:
-                    # 删除旧报价（如果有）
-                    run_query("DELETE FROM quotes WHERE inquiry_id=? AND supplier_username=?", 
-                             (selected_row['id'], st.session_state.username))
-                    # 插入新报价
-                    run_query("INSERT INTO quotes (inquiry_id, supplier_username, price, delivery_days, remarks, timestamp) VALUES (?,?,?,?,?,?)",
-                             (selected_row['id'], st.session_state.username, price, delivery, remarks, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                if st.form_submit_button("创建"):
+                    if n and selected_sups:
+                        pid = str(uuid.uuid4())[:8]
+                        # 直接使用选中的列表
+                        codes = {x: generate_random_code() for x in selected_sups}
+                        shared_data["projects"][pid] = {"name": n, "deadline": f"{d} {t.strftime('%H:%M')}", "codes": codes, "products": {}}
+                        st.rerun()
+                    elif not n:
+                        st.error("请输入项目名称")
+                    elif not selected_sups:
+                        st.error("请至少选择一个供应商")
+
+        st.markdown("---")
+        projs = sorted([p for p in shared_data["projects"].items() if 'deadline' in p[1]], key=lambda x: x[1]['deadline'], reverse=True)
+        for pid, p in projs:
+            with st.expander(f"📅 {p['deadline']} | {p['name']}", expanded=False):
+                st.caption("🔑 供应商授权 (鼠标悬停代码块复制)")
+                with st.container():
+                    cols = st.columns(4)
+                    for i, (sup, code) in enumerate(p['codes'].items()):
+                        with cols[i % 4]:
+                            st.code(sup, language=None)
+                            st.code(code, language=None)
+                st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
+                st.caption("📦 产品管理")
+                for k, v in p['products'].items():
+                    rc1, rc2 = st.columns([8, 1])
+                    rc1.markdown(f"<div style='font-size:0.9em;'>• {k} (x{v['quantity']})</div>", unsafe_allow_html=True)
+                    if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
+                        del p['products'][k]; st.rerun()
+                with st.form(f"add_{pid}", border=False):
+                    ac1, ac2, ac3, ac4 = st.columns([2, 1, 2, 1])
+                    pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
+                    pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed")
+                    pf = ac3.file_uploader("规格", label_visibility="collapsed", key=f"f_{pid}")
+                    if ac4.form_submit_button("添加"):
+                        if pn and pn not in p['products']:
+                            p['products'][pn] = {"quantity": pq, "bids": [], "admin_file": file_to_base64(pf)}
+                            st.rerun()
+                if st.button("🗑️ 删除该项目", key=f"del_{pid}"): del shared_data["projects"][pid]; st.rerun()
+
+    # === 监控中心 ===
+    elif menu == "监控中心":
+        st.subheader("📊 监控中心")
+        opts = {k: f"{v['deadline']} - {v['name']}" for k, v in shared_data["projects"].items() if 'deadline' in v}
+        if not opts: st.warning("无数据"); return
+        sel = st.selectbox("选择项目", list(opts.keys()), format_func=lambda x: opts[x])
+        proj = shared_data["projects"][sel]
+
+        st.markdown("##### 🏆 比价总览")
+        summ = []
+        for pn, pi in proj['products'].items():
+            bids = pi['bids']
+            if bids:
+                prices = [b['price'] for b in bids]
+                mn, mx = min(prices), max(prices)
+                best = ", ".join(set([b['supplier'] for b in bids if b['price'] == mn]))
+                diff = (mx - mn) / mn * 100 if mn > 0 else 0
+                summ.append({"产品": pn, "数量": pi['quantity'], "最低": f"¥{mn}", "最优": best, "最高": f"¥{mx}", "价差": f"{diff:.1f}%", "报价数": len(bids)})
+            else:
+                summ.append({"产品": pn, "数量": pi['quantity'], "最低": "-", "最优": "-", "最高": "-", "价差": "-", "报价数": 0})
+        st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True)
+
+        all_d = []
+        for pn, pi in proj['products'].items():
+            for b in pi['bids']:
+                all_d.append({"产品": pn, "数量": pi['quantity'], "供应商": b['supplier'], "单价": b['price'], "总价": b['price']*pi['quantity'], "备注": b['remark'], "时间": b['time']})
+        if all_d:
+            out = io.BytesIO()
+            with pd.ExcelWriter(out) as writer: pd.DataFrame(all_d).to_excel(writer, index=False)
+            st.download_button("📥 导出Excel", out.getvalue(), "报价明细.xlsx")
+
+        st.markdown("---")
+        for pn, pi in proj['products'].items():
+            with st.container():
+                st.markdown(f"**📦 {pn}**")
+                if pi['bids']:
+                    df = pd.DataFrame(pi['bids'])
+                    c1, c2 = st.columns([1, 1.5])
+                    c1.line_chart(df[['datetime','price','supplier']], x='datetime', y='price', color='supplier', height=180)
                     
-                    st.success("报价已提交给甲方！")
-                    time.sleep(1)
-                    st.rerun()
-        elif input_pwd:
-            st.error("项目密码错误，无法查看详情或报价。")
+                    show_df = df[['supplier','price','remark','time']].copy()
+                    show_df['附件状态'] = ["✅" if b['file'] else "" for b in pi['bids']]
+                    show_df.columns = ['供应商', '单价', '备注', '时间', '附件状态']
+                    c2.dataframe(show_df, use_container_width=True, hide_index=True, height=180)
 
-# ==========================================
-# 6. 主程序入口
-# ==========================================
-def main():
-    st.set_page_config(page_title="询价管理系统", layout="wide", page_icon="📊")
-    
-    # 初始化Session状态
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
-    
-    # 路由控制
-    if not st.session_state.logged_in:
-        login_page()
-    else:
-        if st.session_state.role == "Admin":
-            admin_dashboard()
-        elif st.session_state.role == "Supplier":
-            supplier_dashboard()
+                    file_tags = [get_styled_download_tag(b['file'], b['supplier']) for b in pi['bids'] if b['file']]
+                    if file_tags:
+                        st.caption("📎 附件下载:")
+                        st.markdown("".join(file_tags), unsafe_allow_html=True)
+                else: st.caption("暂无报价")
+                st.divider()
 
-if __name__ == "__main__":
-    main()
+if 'user' not in st.session_state: login_page()
+else:
+    if st.session_state.user_type == "admin": admin_dashboard()
+    else: supplier_dashboard()
