@@ -340,7 +340,7 @@ def admin_dashboard():
                     if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
                         del p['products'][k]; st.rerun()
                 
-                # 添加产品表单
+                # 添加产品表单 (修复了之前的 SyntaxError)
                 with st.form(f"add_{pid}", border=False):
                     ac1, ac2, ac3, ac4, ac5 = st.columns([2, 1, 2, 2, 1])
                     pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
