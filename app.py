@@ -11,7 +11,7 @@ import hashlib
 # --- 页面配置 ---
 st.set_page_config(page_title="华脉招采平台", layout="wide", page_icon="🏢")
 
-# --- 🎨 CSS 样式深度定制 (V2.2 包含字体修复+新功能适配) ---
+# --- 🎨 CSS 样式深度定制 (V2.3 适配附件上传UI) ---
 st.markdown("""
     <style>
         /* 1. 全局布局紧凑化 */
@@ -26,7 +26,7 @@ st.markdown("""
         /* 2. 背景与字体优化 */
         .stApp { background-color: #f4f6f9; }
         
-        /* ⭐️ 核心修复：标题显示不全的问题 */
+        /* 标题修复 */
         h1, h2, h3, h4 {
             line-height: 1.6 !important;
             padding-top: 10px !important;
@@ -34,7 +34,7 @@ st.markdown("""
             font-family: "Source Sans Pro", "Microsoft YaHei", "微软雅黑", sans-serif !important;
         }
         
-        /* 3. 卡片式容器 - 核心UI组件 */
+        /* 3. 卡片式容器 */
         .ui-card {
             background-color: white;
             padding: 20px;
@@ -44,7 +44,7 @@ st.markdown("""
             margin-bottom: 15px;
         }
 
-        /* 4. 优化 st.code 显示 (用于账号密码复制) */
+        /* 4. 优化 st.code (账号密码复制) */
         .stCode { font-size: 14px !important; margin-bottom: 0px !important; }
         div[data-testid="stCodeBlock"] > pre {
             padding: 0.4rem 0.8rem !important;
@@ -53,28 +53,30 @@ st.markdown("""
             border: 1px solid #dee2e6 !important;
         }
 
-        /* 5. 文件上传组件极简风 */
-        section[data-testid="stFileUploader"] { padding: 0px !important; min-height: 0px !important; }
-        section[data-testid="stFileUploader"] > div { padding-top: 5px !important; padding-bottom: 5px !important; }
-        section[data-testid="stFileUploader"] small { display: none; }
-        [data-testid="stFileUploaderDropzoneInstructions"] { display: none; }
+        /* 5. 文件上传组件极简风 (适配狭窄空间) */
+        [data-testid="stFileUploader"] { padding: 0px !important; }
+        [data-testid="stFileUploader"] section { padding: 0px !important; min-height: 0px !important; }
         [data-testid="stFileUploader"] button {
-            border: 1px solid #d1d5db;
+            border: 1px dashed #d1d5db;
             color: #4b5563;
-            background-color: white;
-            padding: 2px 10px;
-            font-size: 13px;
+            background-color: #f9fafb;
+            padding: 4px 10px;
+            font-size: 12px;
+            width: 100%;
         }
+        [data-testid="stFileUploaderDropzoneInstructions"] { display: none; }
+        [data-testid="stFileUploader"] small { display: none; }
 
-        /* 6. 表格与输入框微调 */
+        /* 6. 表格与输入框 */
         .stDataFrame { border: 1px solid #eee; border-radius: 6px; }
         .stTextInput > div > div > input { padding: 8px 10px; font-size: 14px; }
         
-        /* 7. 自定义标签与徽章 */
+        /* 7. 自定义下载标签 */
         .file-tag {
             display: inline-block; background-color: #e3f2fd; color: #0d47a1;
             padding: 2px 8px; border-radius: 4px; border: 1px solid #bbdefb;
             text-decoration: none; font-size: 12px; margin-right: 5px; cursor: pointer;
+            vertical-align: middle;
         }
         .file-tag:hover { background-color: #bbdefb; }
         
@@ -87,10 +89,9 @@ st.markdown("""
 # --- 全局数据初始化 ---
 @st.cache_resource
 def init_global_data():
-    """初始化全局数据，确保所有键都存在且类型正确"""
     return {
-        "projects": {},  # 项目字典：{项目ID: {name, deadline, codes, products}}
-        "suppliers": {   # 供应商字典
+        "projects": {},
+        "suppliers": {
             "GYSA": {"contact": "张经理", "phone": "13800138000", "job": "销售总监", "type": "光纤光缆", "address": "江苏省南京市江宁区xxx号"},
             "GYSB": {"contact": "李工", "phone": "13900139000", "job": "技术支持", "type": "网络机柜", "address": "江苏省苏州市工业园区xxx号"},
             "GYSC": {"contact": "王总", "phone": "13700137000", "job": "总经理", "type": "综合布线", "address": "上海市浦东新区xxx号"}
@@ -201,11 +202,9 @@ def render_supplier_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    # 按钮栏（新增刷新按钮）
     col_l, col_m, col_r = st.columns([5, 1, 1])
     with col_m:
-        if st.button("🔄 刷新", use_container_width=True, help="刷新页面获取最新状态"):
-            st.rerun()
+        if st.button("🔄 刷新", use_container_width=True): st.rerun()
     with col_r:
         if st.button("退出", use_container_width=True):
             st.session_state.clear(); st.rerun()
@@ -220,12 +219,14 @@ def render_supplier_dashboard():
         with st.container():
             st.markdown(f'<div class="ui-card">', unsafe_allow_html=True)
             
-            # 产品标题行
+            # 产品标题行 (显示附件下载)
             c1, c2 = st.columns([3, 1])
             with c1:
                 st.markdown(f"**📦 {p_name}** <span style='color:#666; font-size:0.9em'>({p_info.get('desc','')})</span>", unsafe_allow_html=True)
+                # --- 核心修改：显示甲方上传的规格书 ---
                 if p_info.get("admin_file"):
-                    st.markdown(get_styled_download_tag(p_info["admin_file"], "技术规格书"), unsafe_allow_html=True)
+                    st.markdown(get_styled_download_tag(p_info["admin_file"], "📥 下载规格书/图纸"), unsafe_allow_html=True)
+                # ----------------------------------
             with c2:
                 st.markdown(f"<div style='text-align:right; font-weight:bold;'>需求数量: {p_info['quantity']}</div>", unsafe_allow_html=True)
             
@@ -239,9 +240,9 @@ def render_supplier_dashboard():
                 with fc2:
                     remark = st.text_input("备注", placeholder="选填", key=f"r_{p_name}")
                 with fc3:
-                    file_up = st.file_uploader("附件", key=f"f_{p_name}")
+                    file_up = st.file_uploader("报价附件", key=f"f_{p_name}")
                 with fc4:
-                    st.markdown("<br>", unsafe_allow_html=True) # 对齐按钮
+                    st.markdown("<br>", unsafe_allow_html=True)
                     sub_btn = st.form_submit_button("提交报价", disabled=is_closed, use_container_width=True, type="primary")
 
                 if sub_btn:
@@ -249,7 +250,6 @@ def render_supplier_dashboard():
                     elif price <= 0: st.error("价格需大于0")
                     else:
                         f_data = file_to_base64(file_up)
-                        # 重复检测逻辑
                         new_bid = {
                             "supplier": supplier_name, "price": price, "remark": remark,
                             "file": f_data, "time": now.strftime("%H:%M:%S"), "datetime": now
@@ -273,15 +273,13 @@ def render_admin_dashboard():
     if menu == "项目管理":
         st.subheader("📁 项目管理")
         
-        # 新建项目卡片
+        # 新建项目
         with st.expander("➕ 创建新询价项目", expanded=False):
             with st.form("new_proj"):
                 c1, c2, c3 = st.columns([2, 1, 1])
                 p_name = c1.text_input("项目名称")
                 p_date = c2.date_input("截止日期")
                 p_time = c3.time_input("截止时间", value=datetime.strptime("17:00", "%H:%M").time())
-                
-                # 供应商多选
                 all_sups = list(global_data["suppliers"].keys())
                 sel_sups = st.multiselect("选择参与供应商", all_sups)
                 
@@ -299,69 +297,82 @@ def render_admin_dashboard():
                         }
                         st.success("创建成功"); st.rerun()
 
-        # 项目列表（按时间排序）
+        # 项目列表
         if not global_data["projects"]:
             st.info("暂无项目")
         else:
-            # 排序：最近截止的在前
-            sorted_projs = sorted(
-                global_data["projects"].items(),
-                key=lambda x: x[1]["deadline"],
-                reverse=True
-            )
+            sorted_projs = sorted(global_data["projects"].items(), key=lambda x: x[1]["deadline"], reverse=True)
             
             for pid, pdata in sorted_projs:
                 with st.expander(f"📅 {pdata['deadline']} | {pdata['name']}", expanded=False):
                     
-                    # 1. 供应商账号管理
-                    st.markdown("#### 🔑 供应商授权与密码")
-                    st.info("💡 鼠标悬停在账号或密码上，点击右上角图标即可复制")
-                    
+                    # 1. 供应商管理
+                    st.markdown("#### 🔑 供应商授权")
+                    st.info("💡 鼠标悬停在账号/密码上，点击右上角图标复制")
                     codes = pdata.get("codes", {})
                     if codes:
                         st.markdown('<div class="ui-card">', unsafe_allow_html=True)
                         h1, h2, h3, h4 = st.columns([1.5, 2, 2, 1])
-                        h1.markdown("**供应商**"); h2.markdown("**登录账号**"); h3.markdown("**登录密码**"); h4.markdown("**操作**")
+                        h1.markdown("**供应商**"); h2.markdown("**账号**"); h3.markdown("**密码**"); h4.markdown("**操作**")
                         st.markdown("<hr style='margin:5px 0'>", unsafe_allow_html=True)
-                        
                         for s_name, s_code in codes.items():
                             r1, r2, r3, r4 = st.columns([1.5, 2, 2, 1])
                             with r1: st.markdown(f"<div style='margin-top:5px'>{s_name}</div>", unsafe_allow_html=True)
-                            with r2: st.code(s_name, language=None) # 账号
-                            with r3: st.code(s_code, language=None) # 密码
+                            with r2: st.code(s_name, language=None)
+                            with r3: st.code(s_code, language=None)
                             with r4: 
                                 if st.button("移除", key=f"rm_{pid}_{s_name}"):
                                     del pdata["codes"][s_name]; st.rerun()
-                        
+                        # 追加供应商
                         st.markdown("<hr style='margin:10px 0'>", unsafe_allow_html=True)
                         ac1, ac2 = st.columns([3, 1])
-                        new_sup_name = ac1.text_input("追加新供应商(输入名称)", key=f"add_sup_in_{pid}", label_visibility="collapsed", placeholder="输入名称自动生成账号")
-                        if ac2.button("追加", key=f"btn_add_{pid}"):
-                            if new_sup_name and new_sup_name not in codes:
-                                pdata["codes"][new_sup_name] = generate_random_code()
-                                if new_sup_name not in global_data["suppliers"]:
-                                    global_data["suppliers"][new_sup_name] = {}
+                        new_sup = ac1.text_input("追加供应商", key=f"add_{pid}", label_visibility="collapsed", placeholder="输入名称")
+                        if ac2.button("追加", key=f"btn_{pid}"):
+                            if new_sup and new_sup not in codes:
+                                pdata["codes"][new_sup] = generate_random_code()
+                                if new_sup not in global_data["suppliers"]: global_data["suppliers"][new_sup] = {}
                                 st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                    # 2. 产品管理
+                    # 2. 产品管理（核心修改：增加甲方上传附件）
                     st.markdown("#### 📦 询价产品列表")
                     prods = pdata.get("products", {})
+                    
+                    # --- 添加产品表单 ---
                     with st.form(f"add_p_{pid}", border=True):
-                        c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
-                        pn = c1.text_input("产品名")
+                        st.caption("添加新产品")
+                        # 调整列布局以容纳文件上传
+                        c1, c2, c3, c4, c5 = st.columns([2, 1, 2, 2, 1])
+                        pn = c1.text_input("产品名", placeholder="如：光缆接头盒")
                         pq = c2.number_input("数量", min_value=1, value=1)
-                        pd_ = c3.text_input("描述")
-                        pf = c4.form_submit_button("添加产品")
-                        if pf and pn:
-                            pdata["products"][pn] = {"quantity": pq, "desc": pd_, "bids": []}
+                        pd_ = c3.text_input("描述", placeholder="规格型号")
+                        # 新增：上传控件
+                        pf_up = c4.file_uploader("规格书/图纸", key=f"up_spec_{pid}")
+                        
+                        sub_new_prod = c5.form_submit_button("添加", use_container_width=True, type="primary")
+                        
+                        if sub_new_prod and pn:
+                            # 处理甲方上传的文件
+                            admin_file_data = file_to_base64(pf_up)
+                            pdata["products"][pn] = {
+                                "quantity": pq, 
+                                "desc": pd_, 
+                                "bids": [],
+                                "admin_file": admin_file_data # 存储文件
+                            }
                             st.rerun()
+                    # -------------------
                     
                     if prods:
                         st.markdown('<div class="ui-card">', unsafe_allow_html=True)
                         for pdn, pdi in prods.items():
                             c1, c2 = st.columns([6, 1])
-                            c1.markdown(f"• **{pdn}** (x{pdi['quantity']}) - {pdi.get('desc')}")
+                            # 显示产品信息，如果有附件显示标记
+                            desc_text = f" - {pdi.get('desc')}" if pdi.get('desc') else ""
+                            file_icon = "📎(含附件)" if pdi.get("admin_file") else ""
+                            
+                            c1.markdown(f"• **{pdn}** (x{pdi['quantity']}){desc_text}  <span style='color:#3b82f6; font-size:0.8em'>{file_icon}</span>", unsafe_allow_html=True)
+                            
                             if c2.button("删除", key=f"del_p_{pid}_{pdn}"):
                                 del pdata["products"][pdn]; st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
@@ -372,17 +383,13 @@ def render_admin_dashboard():
     # ================= 供应商库 =================
     elif menu == "供应商库":
         st.subheader("🏢 供应商数据库")
-        
         df = pd.DataFrame.from_dict(global_data["suppliers"], orient='index')
-        if df.empty:
-            df = pd.DataFrame(columns=["contact", "phone", "job", "type", "address"])
-        
+        if df.empty: df = pd.DataFrame(columns=["contact", "phone", "job", "type", "address"])
         df.columns = ["联系人", "电话", "职位", "产品类型", "地址"]
         
         with st.container():
             st.markdown('<div class="ui-card">', unsafe_allow_html=True)
             edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="sup_editor")
-            
             if st.button("💾 保存更改", type="primary"):
                 new_dict = {}
                 for idx, row in edited_df.iterrows():
@@ -391,14 +398,12 @@ def render_admin_dashboard():
                         "job": row.get("职位",""), "type": row.get("产品类型",""), "address": row.get("地址","")
                     }
                 global_data["suppliers"] = new_dict
-                st.success("已保存")
-                st.rerun()
+                st.success("已保存"); st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
     # ================= 监控中心 =================
     elif menu == "监控中心":
         st.subheader("📊 报价分析看板")
-        
         proj_opts = {pid: f"{d['deadline']} | {d['name']}" for pid, d in global_data["projects"].items()}
         sel_pid = st.selectbox("选择项目", options=list(proj_opts.keys()), format_func=lambda x: proj_opts[x])
         
@@ -406,7 +411,7 @@ def render_admin_dashboard():
             pdata = global_data["projects"][sel_pid]
             products = pdata.get("products", {})
             
-            # 汇总表逻辑
+            # 汇总
             summary = []
             for pn, pinfo in products.items():
                 bids = [b for b in pinfo.get("bids", []) if b["price"] > 0]
@@ -426,28 +431,19 @@ def render_admin_dashboard():
             st.dataframe(pd.DataFrame(summary), use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
             
-            # 详细对比图表
+            # 详细
             st.markdown("#### 📈 报价明细与附件")
             for pn, pinfo in products.items():
                 bids = pinfo.get("bids", [])
                 if bids:
                     st.markdown(f"**📦 {pn}**")
+                    st.bar_chart(pd.DataFrame(bids), x="supplier", y="price", color="#3b82f6")
                     
-                    # 1. 图表
-                    chart_data = pd.DataFrame(bids)
-                    st.bar_chart(chart_data, x="supplier", y="price", color="#3b82f6")
-                    
-                    # 2. 详细数据表（含附件下载）
                     st.markdown("<small style='color:#666'>详细报价列表：</small>", unsafe_allow_html=True)
-                    # 表头
                     cols = st.columns([2, 2, 3, 2, 2])
-                    cols[0].markdown("**供应商**")
-                    cols[1].markdown("**单价**")
-                    cols[2].markdown("**备注**")
-                    cols[3].markdown("**报价时间**")
-                    cols[4].markdown("**附件下载**")
+                    cols[0].markdown("**供应商**"); cols[1].markdown("**单价**"); cols[2].markdown("**备注**")
+                    cols[3].markdown("**时间**"); cols[4].markdown("**附件**")
                     st.divider()
-                    
                     for bid in bids:
                         c1, c2, c3, c4, c5 = st.columns([2, 2, 3, 2, 2])
                         c1.caption(bid["supplier"])
@@ -455,16 +451,13 @@ def render_admin_dashboard():
                         c3.caption(bid.get("remark", "-"))
                         c4.caption(bid.get("time", "-"))
                         with c5:
-                            if bid.get("file"):
-                                st.markdown(get_styled_download_tag(bid["file"]), unsafe_allow_html=True)
-                            else:
-                                st.caption("无")
+                            if bid.get("file"): st.markdown(get_styled_download_tag(bid["file"]), unsafe_allow_html=True)
+                            else: st.caption("无")
                     st.markdown("<br>", unsafe_allow_html=True)
 
 # --- 主程序入口 ---
 def main():
-    if "user" not in st.session_state:
-        render_login_page()
+    if "user" not in st.session_state: render_login_page()
     else:
         u_type = st.session_state.get("user_type")
         if u_type == "admin": render_admin_dashboard()
