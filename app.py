@@ -8,11 +8,18 @@ try:
     from docx import Document
     from docx.shared import Pt, Cm, RGBColor
     from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
+    from docx.oxml.ns import qn, nsmap # 引入 nsmap
     
     import mistletoe
     from mistletoe import block_token, span_token
     from mistletoe.base_renderer import BaseRenderer
+    
+    # ==========================================
+    # --- 关键修复：手动注册 VML 命名空间 ---
+    # ==========================================
+    # 这两行代码是为了解决 KeyError: 'v' 错误
+    nsmap['v'] = 'urn:schemas-microsoft-com:vml'
+    nsmap['o'] = 'urn:schemas-microsoft-com:office:office'
     
 except ImportError as e:
     st.error(f"🚨 依赖库导入失败: {e}")
@@ -30,9 +37,7 @@ def setup_page_layout(doc, image_stream=None):
     bg_rId = None
     if image_stream:
         try:
-            # 关键：重置文件指针，防止读取为空
             image_stream.seek(0)
-            # 获取或添加图片，返回 rId (如 "rId4")
             bg_rId, _ = doc.part.get_or_add_image(image_stream)
         except Exception as e:
             st.error(f"背景图处理失败: {e}")
@@ -53,15 +58,16 @@ def setup_page_layout(doc, image_stream=None):
         # --- C. 设置背景图 (VML) ---
         if bg_rId:
             section_element = section._sectPr
+            
             # 构造 VML XML
-            # fill type="frame" 会自动拉伸图片填满纸张
             vmldata = f"""<v:background id="_x0000_s1025" o:bwmode="white" fillcolor="white [3212]" 
                           xmlns:v="urn:schemas-microsoft-com:vml" 
                           xmlns:o="urn:schemas-microsoft-com:office:office">
                 <v:fill r:id="{bg_rId}" type="frame"/>
             </v:background>"""
             
-            # 清除旧背景（如果有）并插入新背景
+            # 清除旧背景（如果有）
+            # 注意：现在 'v' 已经在 nsmap 里注册过，qn('v:background') 不会再报错
             existing_bg = section_element.find(qn('v:background'))
             if existing_bg is not None:
                 section_element.remove(existing_bg)
@@ -76,7 +82,6 @@ def setup_page_layout(doc, image_stream=None):
 class DocxRenderer(BaseRenderer):
     def __init__(self, doc):
         self.doc = doc
-        # 设置正文字体
         style = doc.styles['Normal']
         font = style.font
         font.name = '微软雅黑'
@@ -93,7 +98,6 @@ class DocxRenderer(BaseRenderer):
         level = token.level
         text = self.render_inner(token)
         p = self.doc.add_heading(text, level=level)
-        # 标题间距优化
         p.paragraph_format.space_before = Pt(12)
         p.paragraph_format.space_after = Pt(6)
 
@@ -143,8 +147,7 @@ class DocxRenderer(BaseRenderer):
             image_stream = io.BytesIO(response.content)
             
             run = parent_paragraph.add_run()
-            # 限制 markdown 内嵌图片宽度，防止撑破页面
-            run.add_picture(image_stream, width=Cm(14)) 
+            run.add_picture(image_stream, width=Cm(14))
             parent_paragraph.add_run(f"\n{alt_text}").italic = True
         except Exception:
              run = parent_paragraph.add_run(f"[图片加载失败: {alt_text}]")
@@ -192,18 +195,12 @@ class DocxRenderer(BaseRenderer):
 # ==========================================
 st.set_page_config(page_title="Huamai 文档生成器", layout="wide", page_icon="📄")
 
-st.title("📄 Huamai 文档生成工具 (V5.0 精确版)")
-st.markdown("""
-**本次更新：**
-1. 📐 **强制 A4 尺寸** (210mm x 297mm)
-2. 📏 **精确页边距** (上72pt, 下72pt, 左54pt, 右54pt)
-3. 🖼️ **修复背景图丢失问题**
-""")
+st.title("📄 Huamai 文档生成工具 (V5.1 修复版)")
 
 col1, col2 = st.columns([4, 6])
 
 with col1:
-    st.info("💡 请上传 A4 尺寸背景图")
+    st.info("💡 请上传 A4 背景图")
     bg_file = st.file_uploader("上传背景图 (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
     generate_btn = st.button("🚀 生成文档", type="primary", use_container_width=True)
 
@@ -227,30 +224,26 @@ if generate_btn:
     else:
         with st.spinner("正在排版..."):
             try:
-                # 1. 创建文档
                 doc = Document()
                 
-                # 2. 渲染 Markdown 内容
-                # 注意：先渲染内容，再应用布局，确保布局应用到所有生成的章节
+                # 先渲染内容
                 renderer = DocxRenderer(doc)
                 doc_token = mistletoe.Document(md_input)
                 renderer.render(doc_token)
                 
-                # 3. 应用布局 (A4, 边距, 背景图)
-                # 传入背景图片流
+                # 后应用布局 (这样背景图会应用到所有页面)
                 bg_stream = io.BytesIO(bg_file.getvalue()) if bg_file else None
                 setup_page_layout(doc, bg_stream)
                 
-                # 4. 保存
                 doc_io = io.BytesIO()
                 doc.save(doc_io)
                 doc_io.seek(0)
                 
-                st.success("✅ 生成成功！背景图和边距已应用。")
+                st.success("✅ 生成成功！背景图已完美应用。")
                 st.download_button(
-                    label="📥 下载最终文档 (A4)",
+                    label="📥 下载最终文档",
                     data=doc_io,
-                    file_name="Huamai_A4_Spec.docx",
+                    file_name="Huamai_Final.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     type="primary"
                 )
