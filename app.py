@@ -7,17 +7,15 @@ try:
     import docx
     from docx import Document
     from docx.shared import Pt, Cm, RGBColor
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn, nsmap # 引入 nsmap
+    # [修复点1] 引入 parse_xml 用于解析字符串
+    from docx.oxml import parse_xml  
+    from docx.oxml.ns import qn, nsmap 
     
     import mistletoe
     from mistletoe import block_token, span_token
     from mistletoe.base_renderer import BaseRenderer
     
-    # ==========================================
-    # --- 关键修复：手动注册 VML 命名空间 ---
-    # ==========================================
-    # 这两行代码是为了解决 KeyError: 'v' 错误
+    # 注册命名空间 (防止 KeyError: 'v')
     nsmap['v'] = 'urn:schemas-microsoft-com:vml'
     nsmap['o'] = 'urn:schemas-microsoft-com:office:office'
     
@@ -49,7 +47,6 @@ def setup_page_layout(doc, image_stream=None):
         section.page_height = Cm(29.7)
         
         # --- B. 设置用户指定的精确边距 ---
-        # 上:72pt 下:72pt 左:54pt 右:54pt
         section.top_margin = Pt(72)
         section.bottom_margin = Pt(72)
         section.left_margin = Pt(54)
@@ -66,13 +63,13 @@ def setup_page_layout(doc, image_stream=None):
                 <v:fill r:id="{bg_rId}" type="frame"/>
             </v:background>"""
             
-            # 清除旧背景（如果有）
-            # 注意：现在 'v' 已经在 nsmap 里注册过，qn('v:background') 不会再报错
+            # 清除旧背景
             existing_bg = section_element.find(qn('v:background'))
             if existing_bg is not None:
                 section_element.remove(existing_bg)
             
-            bg_element = OxmlElement.from_xml(vmldata)
+            # [修复点2] 使用 parse_xml 将字符串转为 XML 元素
+            bg_element = parse_xml(vmldata)
             section_element.insert(0, bg_element)
 
 # ==========================================
@@ -195,7 +192,7 @@ class DocxRenderer(BaseRenderer):
 # ==========================================
 st.set_page_config(page_title="Huamai 文档生成器", layout="wide", page_icon="📄")
 
-st.title("📄 Huamai 文档生成工具 (V5.1 修复版)")
+st.title("📄 Huamai 文档生成工具 (V5.2 最终修正)")
 
 col1, col2 = st.columns([4, 6])
 
@@ -226,12 +223,10 @@ if generate_btn:
             try:
                 doc = Document()
                 
-                # 先渲染内容
                 renderer = DocxRenderer(doc)
                 doc_token = mistletoe.Document(md_input)
                 renderer.render(doc_token)
                 
-                # 后应用布局 (这样背景图会应用到所有页面)
                 bg_stream = io.BytesIO(bg_file.getvalue()) if bg_file else None
                 setup_page_layout(doc, bg_stream)
                 
@@ -239,11 +234,11 @@ if generate_btn:
                 doc.save(doc_io)
                 doc_io.seek(0)
                 
-                st.success("✅ 生成成功！背景图已完美应用。")
+                st.success("✅ 生成成功！")
                 st.download_button(
                     label="📥 下载最终文档",
                     data=doc_io,
-                    file_name="Huamai_Final.docx",
+                    file_name="Huamai_Final_Fixed.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     type="primary"
                 )
