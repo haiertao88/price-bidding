@@ -19,25 +19,23 @@ except ImportError as e:
     st.stop()
 
 # ==========================================
-# 核心功能区
+# 核心修复区：背景图与保存逻辑
 # ==========================================
 
 def set_true_background(doc, image_stream):
-    """设置 Word 文档底层背景 (含 rId 修复)"""
+    """
+    设置 Word 文档底层背景
+    修复了 AttributeError: '_io.BytesIO' object has no attribute 'rels'
+    """
     try:
         document_part = doc.part
-        # 获取图片关联 ID
-        rel_result = document_part.relate_to(image_stream, docx.opc.constants.RELATIONSHIP_TYPE.IMAGE)
         
-        # 兼容性处理：不同版本 python-docx 返回类型不同
-        if isinstance(rel_result, str):
-            r_id = rel_result
-        elif hasattr(rel_result, 'rId'):
-            r_id = rel_result.rId
-        else:
-            r_id = str(rel_result)
+        # [核心修复点] 
+        # 不能直接用 relate_to(stream)，必须用 get_or_add_image(stream)
+        # 它会正确创建 ImagePart 并返回 (rId, image_part)
+        r_id, _ = document_part.get_or_add_image(image_stream)
 
-        # 构造 VML XML
+        # 构造 VML XML (定义背景)
         vmldata = f"""<v:background id="_x0000_s1025" o:bwmode="white" fillcolor="white [3212]" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
         <v:fill r:id="{r_id}" type="frame"/>
         </v:background>"""
@@ -56,12 +54,16 @@ def set_true_background(doc, image_stream):
             
     except Exception as e:
         print(f"背景设置警告: {e}")
+        # 这里不抛出异常，防止阻断保存
+
+# ==========================================
+# 渲染器逻辑
+# ==========================================
 
 class DocxRenderer(BaseRenderer):
     """自定义 Markdown 渲染器"""
     def __init__(self, doc):
         self.doc = doc
-        # 设置全局中文字体
         style = doc.styles['Normal']
         font = style.font
         font.name = '微软雅黑'
@@ -102,31 +104,25 @@ class DocxRenderer(BaseRenderer):
         run = self.render_inner(token, parent_paragraph)
         if run: run.italic = True
         
-    # --- 修复点：彻底重写列表渲染逻辑 ---
     def render_list(self, token):
         # 1. 确定列表样式
         list_style = 'List Number' if token.start else 'List Bullet'
         
-        # 2. 遍历列表项 (List Items)
+        # 2. 遍历列表项，手动处理，避免传递非法参数
         if hasattr(token, 'children') and token.children:
             for list_item in token.children:
-                # 3. 直接在这里处理列表项，不再调用 self.render(..., style=...)
                 if hasattr(list_item, 'children') and list_item.children:
-                    # 获取列表项的第一个子元素（通常是段落）
                     first_child = list_item.children[0]
-                    
                     # 创建带样式的段落
                     paragraph = self.doc.add_paragraph(style=list_style)
-                    
                     # 渲染内容
                     if isinstance(first_child, block_token.Paragraph):
                         self.render_inner(first_child, paragraph)
                     else:
-                        # 简单的兜底渲染
                         self.render_inner(first_child, paragraph)
 
-    # render_list_item 不再需要被直接调用，逻辑已合并到 render_list 中以避免传参错误
     def render_list_item(self, token): 
+        # 由 render_list 接管，此处留空
         pass 
 
     def render_image(self, token, parent_paragraph):
@@ -191,12 +187,12 @@ class DocxRenderer(BaseRenderer):
 # ==========================================
 st.set_page_config(page_title="Huamai 文档生成器", layout="wide", page_icon="📄")
 
-st.title("📄 Huamai 文档生成工具 (最终修复版)")
+st.title("📄 Huamai 文档生成工具 (V4.0)")
 
 col1, col2 = st.columns([4, 6])
 
 with col1:
-    st.info("💡 请上传你的背景底图")
+    st.info("💡 请上传 A4 背景图")
     bg_file = st.file_uploader("上传背景图 (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
     generate_btn = st.button("🚀 生成 Word 文档", type="primary", use_container_width=True)
 
