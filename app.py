@@ -1,423 +1,237 @@
 import streamlit as st
-import pandas as pd
 import io
-import random
-import string
-import uuid
-import base64
-from datetime import datetime, timedelta
+import requests
 
-# --- 页面配置 ---
-st.set_page_config(page_title="华脉招采平台", layout="wide")
+# --- 调试与安全导入模块 ---
+try:
+    import docx
+    from docx import Document
+    from docx.shared import Pt, Cm, RGBColor
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    
+    # 使用全路径导入 mistletoe，防止路径混淆
+    import mistletoe
+    import mistletoe.block_token as block_token
+    import mistletoe.span_token as span_token
+    from mistletoe.base_renderer import BaseRenderer
+    
+except ImportError as e:
+    st.error("🚨 库导入失败！请检查 requirements.txt 或仓库中是否有同名文件冲突。")
+    st.code(f"详细错误: {str(e)}")
+    st.stop()
+except Exception as e:
+    st.error(f"🚨 发生未知错误: {str(e)}")
+    st.stop()
 
-# --- 🎨 CSS 样式深度定制 ---
-st.markdown("""
-    <style>
-        /* 1. 修复标题遮挡：加大顶部间距 */
-        .block-container {
-            padding-top: 5rem !important;
-            padding-bottom: 2rem !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-        }
-        
-        /* 2. 组件间距优化 */
-        div[data-testid="stVerticalBlock"] > div { gap: 0.5rem !important; }
-        
-        /* 3. 代码块样式 (复制框) */
-        .stCode { font-size: 0.9em !important; margin-bottom: 0px !important; }
-        div[data-testid="stCodeBlock"] > pre { padding: 0.4rem !important; border-radius: 4px !important; }
+# ==========================================
+# 核心功能区
+# ==========================================
 
-        /* 4. 文件上传框汉化与美化 */
-        section[data-testid="stFileUploader"] { padding: 0px !important; min-height: 0px !important; }
-        section[data-testid="stFileUploader"] > div { padding-top: 5px !important; padding-bottom: 5px !important; }
-        section[data-testid="stFileUploader"] small { display: none; }
-        [data-testid="stFileUploaderDropzoneInstructions"] > div:first-child { display: none; }
-        [data-testid="stFileUploaderDropzoneInstructions"] > div:nth-child(2) small { display: none; }
-        [data-testid="stFileUploader"] button { color: transparent !important; position: relative; min-width: 80px !important; }
-        [data-testid="stFileUploader"] button::after {
-            content: "📂 选择文件"; color: #31333F; position: absolute;
-            left: 50%; top: 50%; transform: translate(-50%, -50%);
-            font-size: 14px; white-space: nowrap;
-        }
-        section[data-testid="stFileUploader"] > div > div::before {
-            content: "拖拽文件到此处 / 200MB内"; position: absolute;
-            left: 10px; top: 50%; transform: translateY(-50%);
-            font-size: 13px; color: #888; pointer-events: none; z-index: 1;
-        }
-        section[data-testid="stFileUploader"] > div { justify-content: flex-end; }
-
-        /* 5. 其他样式 */
-        .compact-card { border: 1px solid #eee; background-color: #fcfcfc; padding: 10px; border-radius: 6px; margin-bottom: 5px; }
-        .stDataFrame { font-size: 0.85rem; }
-        .prod-desc { font-size: 0.85em; color: #666; margin-left: 5px; font-style: italic;}
-        .sup-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; background-color: #e6f3ff; color: #0068c9; border: 1px solid #cce5ff; font-size: 0.85rem; margin-right: 5px; margin-bottom: 5px; }
-        .sup-info { font-size: 0.8em; color: #666; margin-left: 10px; }
-        
-        /* 附件胶囊 */
-        .file-tag {
-            display: inline-block; background-color: #f0f2f6; color: #31333F;
-            padding: 4px 10px; border-radius: 15px; border: 1px solid #dce0e6;
-            margin-right: 8px; margin-bottom: 8px; text-decoration: none;
-            font-size: 0.85rem; transition: all 0.2s;
-        }
-        .file-tag:hover { background-color: #e0e4eb; border-color: #cdd3dd; color: #0068c9; }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- 全局数据 ---
-@st.cache_resource
-def get_global_data():
-    return { 
-        "projects": {},
-        "suppliers": {
-            "GYSA": {"contact": "张经理", "phone": "13800138000", "job": "销售总监", "type": "光纤光缆", "address": "江苏省南京市江宁区xxx号"},
-            "GYSB": {"contact": "李工", "phone": "13900139000", "job": "技术支持", "type": "网络机柜", "address": "江苏省苏州市工业园区xxx号"},
-            "GYSC": {"contact": "王总", "phone": "13700137000", "job": "总经理", "type": "综合布线", "address": "上海市浦东新区xxx号"}
-        }
-    }
-shared_data = get_global_data()
-
-# 数据结构自检 (防止旧数据报错)
-if isinstance(shared_data.get("suppliers"), list):
-    old_list = shared_data["suppliers"]
-    shared_data["suppliers"] = {name: {"contact": "", "phone": "", "job": "", "type": "", "address": ""} for name in old_list}
-
-invalid_pids = []
-for pid, data in shared_data["projects"].items():
-    if 'deadline' not in data: invalid_pids.append(pid)
-for pid in invalid_pids: del shared_data["projects"][pid]
-
-# --- 工具函数 ---
-def generate_random_code(length=6):
-    return ''.join(random.choices(string.digits, k=length))
-
-def file_to_base64(uploaded_file):
-    if uploaded_file is None: return None
+def set_true_background(doc, image_stream):
+    """设置 Word 文档底层背景"""
     try:
-        bytes_data = uploaded_file.getvalue()
-        b64 = base64.b64encode(bytes_data).decode()
-        return {"name": uploaded_file.name, "type": uploaded_file.type, "data": b64}
-    except Exception as e: return None
+        document_part = doc.part
+        image_part = document_part.relate_to(image_stream, docx.opc.constants.RELATIONSHIP_TYPE.IMAGE)
+        r_id = image_part.rId
 
-def get_styled_download_tag(file_dict, supplier_name=""):
-    if not file_dict: return ""
-    b64 = file_dict["data"]
-    label = f"📎 {supplier_name} - {file_dict['name']}" if supplier_name else f"📎 {file_dict['name']}"
-    href = f"""<a href="data:{file_dict['type']};base64,{b64}" download="{file_dict['name']}" class="file-tag" target="_blank">{label}</a>"""
-    return href
-
-def get_simple_download_link(file_dict, label="📄"):
-    if not file_dict: return ""
-    b64 = file_dict["data"]
-    display_text = f"{label} （华脉提供资料）: {file_dict['name']}"
-    return f'<a href="data:{file_dict["type"]};base64,{b64}" download="{file_dict["name"]}" style="text-decoration:none; color:#0068c9; font-weight:bold; font-size:0.85em;">{display_text}</a>'
-
-# --- 登录页面 ---
-def login_page():
-    st.markdown("<h3 style='text-align: center; margin-bottom: 1rem;'>🔐 华脉招采平台</h3>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1.5, 1])
-    with c2:
-        with st.container(border=True):
-            u = st.text_input("用户名", label_visibility="collapsed", placeholder="用户名").strip()
-            p = st.text_input("密码", type="password", label_visibility="collapsed", placeholder="密码/通行码").strip()
-            if st.button("登录", type="primary", use_container_width=True):
-                if u == "HUAMAI" and p == "HUAMAI888":
-                    st.session_state.user_type = "admin"; st.session_state.user = u; st.rerun()
-                else:
-                    found = False
-                    for pid, d in shared_data["projects"].items():
-                        if u in d["codes"] and d["codes"][u] == p:
-                            st.session_state.user_type = "supplier"; st.session_state.user = u; st.session_state.project_id = pid
-                            st.rerun(); found = True; break
-                    if not found: st.error("验证失败")
-
-# --- 供应商界面 ---
-def supplier_dashboard():
-    user = st.session_state.user
-    pid = st.session_state.project_id
-    proj = shared_data["projects"].get(pid)
-    if not proj: st.error("项目不存在"); return
-    
-    try: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M")
-    except: deadline = datetime.strptime(proj['deadline'], "%Y-%m-%d %H:%M:%S")
-
-    now = datetime.now()
-    closed = now > deadline
-    left = deadline - now
-
-    with st.container(border=True):
-        c1, c2, c3, c4, c5 = st.columns([1, 2, 1.2, 0.6, 0.6])
-        c1.markdown(f"**👤 {user}**")
-        c2.caption(f"项目: {proj['name']}")
-        if closed: c3.error("🚫 已截止")
-        else: c3.success(f"⏳ 剩余: {str(left).split('.')[0]}")
-        if c4.button("🔄 刷新", help="获取最新数据"): st.rerun()
-        if c5.button("退出"): st.session_state.clear(); st.rerun()
-
-    products = proj["products"]
-    if not products: st.info("暂无产品"); return
-    if not closed and timedelta(minutes=0) < left < timedelta(minutes=15): st.warning("🔥 竞价最后阶段！")
-
-    for pname, pinfo in products.items():
-        with st.container():
-            # 显示描述
-            desc_text = pinfo.get('desc', '')
-            desc_html = f"<span class='prod-desc'>({desc_text})</span>" if desc_text else ""
-            
-            st.markdown(f"""
-            <div class="compact-card" style="display:flex; justify-content:space-between; align-items:center;">
-                <span><b>📦 {pname}</b> {desc_html}</span>
-                <small style='color:#666'>数量: {pinfo['quantity']}</small>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            link = get_simple_download_link(pinfo.get('admin_file'))
-            if link: st.markdown(f"<div style='margin-top:-5px; margin-bottom:5px; font-size:0.8rem'>{link}</div>", unsafe_allow_html=True)
-
-            with st.form(key=f"f_{pname}", border=False):
-                fc1, fc2, fc3, fc4 = st.columns([1.5, 2, 2, 1])
-                with fc1: price = st.number_input("单价", min_value=0.0, step=0.1, label_visibility="collapsed", placeholder="¥单价")
-                with fc2: remark = st.text_input("备注", label_visibility="collapsed", placeholder="备注")
-                with fc3: sup_file = st.file_uploader("附件", type=['pdf','jpg','xlsx'], label_visibility="collapsed", key=f"u_{pname}")
-                with fc4: 
-                    submitted = st.form_submit_button("提交", use_container_width=True)
-                    if submitted:
-                        if not closed:
-                            if price > 0:
-                                fdata = file_to_base64(sup_file)
-                                # 防重复提交
-                                my_history = [b for b in pinfo['bids'] if b['supplier'] == user]
-                                is_duplicate = False
-                                if my_history:
-                                    last_bid = my_history[-1]
-                                    last_fname = last_bid['file']['name'] if last_bid['file'] else None
-                                    curr_fname = fdata['name'] if fdata else None
-                                    if (last_bid['price'] == price and last_bid['remark'] == remark and last_fname == curr_fname):
-                                        is_duplicate = True
-                                
-                                if is_duplicate:
-                                    st.toast("⚠️ 报价未变更，系统已过滤重复提交", icon="🛡️")
-                                else:
-                                    pinfo['bids'].append({'supplier': user, 'price': price, 'remark': remark, 'file': fdata, 'time': now.strftime('%H:%M:%S'), 'datetime': now})
-                                    st.toast("✅ 报价成功", icon="🎉")
-                            else: st.toast("❌ 价格无效", icon="🚫")
-                        else: st.error("已截止")
-            st.markdown("<hr style='margin: 0.1rem 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
-
-# --- 管理员界面 ---
-def admin_dashboard():
-    # 🔥 核心修复：申明全局变量，解决 UnboundLocalError
-    global shared_data
-    
-    st.sidebar.title("👮‍♂️ 总控")
-    if st.sidebar.button("🔄 刷新数据", use_container_width=True): st.rerun()
-    menu = st.sidebar.radio("菜单", ["项目管理", "供应商库", "监控中心"])
-    if st.sidebar.button("退出系统"): st.session_state.clear(); st.rerun()
-
-    # === 供应商库管理 ===
-    if menu == "供应商库":
-        st.subheader("🏢 供应商管理")
-        with st.expander("➕ 登记新供应商", expanded=False):
-            with st.form("add_sup_form"):
-                st.caption("基本信息")
-                c1, c2, c3 = st.columns(3)
-                new_name = c1.text_input("供应商名称 (必填)", placeholder="企业全称")
-                new_contact = c2.text_input("联系人", placeholder="姓名")
-                new_job = c3.text_input("职位", placeholder="如: 销售经理")
-                st.caption("详细信息")
-                c4, c5, c6 = st.columns(3)
-                new_phone = c4.text_input("电话", placeholder="手机/座机")
-                new_type = c5.text_input("产品类型", placeholder="如: 光缆/机柜")
-                new_addr = c6.text_input("地址", placeholder="办公地址")
-                if st.form_submit_button("💾 保存录入", use_container_width=True):
-                    if new_name:
-                        if new_name not in shared_data["suppliers"]:
-                            shared_data["suppliers"][new_name] = {"contact": new_contact, "phone": new_phone, "job": new_job, "type": new_type, "address": new_addr}
-                            st.success(f"✅ 已添加: {new_name}"); st.rerun()
-                        else: st.error("❌ 该供应商已存在")
-                    else: st.error("⚠️ 供应商名称不能为空")
-
-        st.markdown("---")
-        st.subheader("📋 供应商名录")
-        st.info("💡 提示：可直接修改下方表格内容，改完点击【保存所有修改】。")
+        # 构造 VML XML
+        vmldata = f"""<v:background id="_x0000_s1025" o:bwmode="white" fillcolor="white [3212]" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+        <v:fill r:id="{r_id}" type="frame"/>
+        </v:background>"""
         
-        if shared_data["suppliers"]:
-            df_source = pd.DataFrame.from_dict(shared_data["suppliers"], orient='index')
-            required_cols = ["contact", "job", "phone", "type", "address"]
-            for col in required_cols:
-                if col not in df_source.columns: df_source[col] = ""
+        # 应用到所有章节
+        for section in doc.sections:
+            section_element = section._sectPr
+            bg_element = OxmlElement.from_xml(vmldata)
+            # 防止重复插入
+            if section_element.find(qn('v:background')) is None:
+                section_element.insert(0, bg_element)
             
-            edited_df = st.data_editor(
-                df_source, 
-                column_config={"contact": "联系人", "job": "职位", "phone": "电话", "type": "产品类型", "address": "地址"},
-                use_container_width=True, 
-                key="sup_editor"
-            )
+            # 设置页边距以避开背景图的Logo区域 (根据你的A4设计调整)
+            section.top_margin = Cm(3.0)      
+            section.bottom_margin = Cm(2.0)
+            section.left_margin = Cm(2.5)
+            section.right_margin = Cm(2.0)
             
-            if st.button("💾 保存所有修改", type="primary"):
-                shared_data["suppliers"] = edited_df.to_dict(orient='index')
-                st.toast("✅ 更新成功", icon="🎉"); st.rerun()
-            
-            st.divider()
-            st.caption("🗑️ 删除操作")
-            for name in list(shared_data["suppliers"].keys()):
-                 with st.container():
-                    col_info, col_del = st.columns([6, 1])
-                    col_info.markdown(f"**{name}**")
-                    if col_del.button("删除", key=f"del_sup_{name}"):
-                        del shared_data["suppliers"][name]; st.rerun()
-        else: st.info("暂无供应商数据")
+    except Exception as e:
+        st.warning(f"背景图设置出现小问题，但不影响文档生成: {e}")
 
-    # === 项目管理 ===
-    elif menu == "项目管理":
-        st.subheader("📁 项目管理")
-        with st.expander("➕ 新建项目", expanded=False):
-            with st.form("new"):
-                c1, c2, c3 = st.columns([1.5, 1, 1])
-                n = c1.text_input("名称", placeholder="项目名", label_visibility="collapsed")
-                d = c2.date_input("日期", datetime.now(), label_visibility="collapsed")
-                t = c3.time_input("时间", datetime.strptime("17:00", "%H:%M").time(), label_visibility="collapsed")
-                available_sups = list(shared_data.get("suppliers", {}).keys())
-                if not available_sups:
-                    st.error("⚠️ 请先在【供应商库】录入供应商！")
-                    selected_sups = []
-                else:
-                    selected_sups = st.multiselect("选择供应商", available_sups, placeholder="请勾选参与报价的供应商")
-                if st.form_submit_button("创建"):
-                    if n and selected_sups:
-                        pid = str(uuid.uuid4())[:8]
-                        codes = {x: generate_random_code() for x in selected_sups}
-                        shared_data["projects"][pid] = {"name": n, "deadline": f"{d} {t.strftime('%H:%M')}", "codes": codes, "products": {}}
-                        st.rerun()
-                    elif not n: st.error("请输入项目名称")
-                    elif not selected_sups: st.error("请至少选择一个供应商")
+class DocxRenderer(BaseRenderer):
+    """自定义 Markdown 渲染器"""
+    def __init__(self, doc):
+        self.doc = doc
+        # 优化中文字体设置
+        style = doc.styles['Normal']
+        font = style.font
+        font.name = '微软雅黑'
+        font.size = Pt(10.5)
+        font._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+        # mistletoe 解析入口
+        super().__init__()
 
-        st.markdown("---")
-        projs = sorted([p for p in shared_data["projects"].items() if 'deadline' in p[1]], key=lambda x: x[1]['deadline'], reverse=True)
-        for pid, p in projs:
-            with st.expander(f"📅 {p['deadline']} | {p['name']}", expanded=False):
-                # 1. 追加供应商
-                with st.expander("➕ 追加供应商", expanded=False):
-                    with st.form(f"append_sup_{pid}"):
-                        all_global = list(shared_data["suppliers"].keys())
-                        curr_sups = list(p['codes'].keys())
-                        rem = [s for s in all_global if s not in curr_sups]
-                        c_sel, c_new = st.columns(2)
-                        sel_sup = c_sel.selectbox("从库中选", ["--请选择--"] + rem)
-                        new_sup = c_new.text_input("或输入新供应商 (自动入库)", placeholder="临时新增名称")
-                        if st.form_submit_button("立即添加"):
-                            t_name = None
-                            if new_sup:
-                                t_name = new_sup.strip()
-                                if t_name not in shared_data["suppliers"]:
-                                    shared_data["suppliers"][t_name] = {"contact":"", "phone":"", "job":"", "type":"临时追加", "address":""}
-                            elif sel_sup != "--请选择--": t_name = sel_sup
-                            if t_name:
-                                if t_name not in p['codes']:
-                                    p['codes'][t_name] = generate_random_code()
-                                    st.success(f"✅ 已添加 {t_name}"); st.rerun()
-                                else: st.warning("已存在")
-                            else: st.warning("无效操作")
+    def render_document(self, token):
+        for child in token.children:
+            self.render(child)
 
-                # 2. 供应商管理 (修复布局问题 + 增加删除功能)
-                st.caption("🔑 供应商管理 (含移除功能)")
-                if p['codes']:
-                    # 表头
-                    st.markdown("""<div style="display:flex; color:#666; font-size:0.8em; margin-bottom:5px;">
-                        <div style="flex:1.5;">供应商</div>
-                        <div style="flex:2;">用户名(复制)</div>
-                        <div style="flex:2;">密码(复制)</div>
-                        <div style="flex:0.8;">操作</div>
-                    </div>""", unsafe_allow_html=True)
-                    
-                    for sup, code in list(p['codes'].items()):
-                        # 使用 4 列布局解决挤压问题
-                        c1, c2, c3, c4 = st.columns([1.5, 2, 2, 0.8])
-                        with c1: st.markdown(f"**{sup}**")
-                        with c2: st.code(sup, language=None) # 用户名可复制
-                        with c3: st.code(code, language=None) # 密码可复制
-                        with c4:
-                            if st.button("🗑️", key=f"rm_{pid}_{sup}", help="移除该供应商"):
-                                del p['codes'][sup]
-                                st.rerun()
-                else: st.info("⚠️ 当前无供应商")
-                
-                st.markdown("<div style='margin-bottom: 10px'></div>", unsafe_allow_html=True)
-                
-                # 3. 产品管理
-                st.caption("📦 产品管理")
-                for k, v in p['products'].items():
-                    desc_str = f"({v.get('desc')})" if v.get('desc') else ""
-                    rc1, rc2 = st.columns([8, 1])
-                    rc1.markdown(f"<div style='font-size:0.9em;'>• {k} {desc_str} (x{v['quantity']})</div>", unsafe_allow_html=True)
-                    if rc2.button("✕", key=f"d{pid}{k}", help="删除"): 
-                        del p['products'][k]; st.rerun()
-                
-                # 添加产品表单 (修复 SyntaxError)
-                with st.form(f"add_{pid}", border=False):
-                    ac1, ac2, ac3, ac4, ac5 = st.columns([2, 1, 2, 2, 1])
-                    pn = ac1.text_input("产品", label_visibility="collapsed", placeholder="产品名")
-                    pq = ac2.number_input("数量", min_value=1, label_visibility="collapsed")
-                    pd = ac3.text_input("描述", label_visibility="collapsed", placeholder="描述:规格/技术要求")
-                    pf = ac4.file_uploader("规格", label_visibility="collapsed", key=f"f_{pid}")
-                    if ac5.form_submit_button("添加"):
-                        if pn and pn not in p['products']:
-                            p['products'][pn] = {"quantity": pq, "desc": pd, "bids": [], "admin_file": file_to_base64(pf)}
-                            st.rerun()
-                if st.button("🗑️ 删除该项目", key=f"del_{pid}"): del shared_data["projects"][pid]; st.rerun()
+    def render_heading(self, token):
+        level = token.level
+        text = self.render_inner(token)
+        p = self.doc.add_heading(text, level=level)
+        p.paragraph_format.space_before = Pt(12)
+        p.paragraph_format.space_after = Pt(6)
 
-    # === 监控中心 ===
-    elif menu == "监控中心":
-        st.subheader("📊 监控中心")
-        opts = {k: f"{v['deadline']} - {v['name']}" for k, v in shared_data["projects"].items() if 'deadline' in v}
-        if not opts: st.warning("无数据"); return
-        sel = st.selectbox("选择项目", list(opts.keys()), format_func=lambda x: opts[x])
-        proj = shared_data["projects"][sel]
+    def render_paragraph(self, token):
+        paragraph = self.doc.add_paragraph()
+        self.render_inner(token, paragraph)
 
-        st.markdown("##### 🏆 比价总览")
-        summ = []
-        for pn, pi in proj['products'].items():
-            bids = pi['bids']
-            if bids:
-                prices = [b['price'] for b in bids]
-                mn, mx = min(prices), max(prices)
-                best = ", ".join(set([b['supplier'] for b in bids if b['price'] == mn]))
-                diff = (mx - mn) / mn * 100 if mn > 0 else 0
-                summ.append({"产品": pn, "数量": pi['quantity'], "最低": f"¥{mn}", "最优": best, "最高": f"¥{mx}", "价差": f"{diff:.1f}%", "报价数": len(bids)})
+    def render_raw_text(self, token, parent_paragraph=None):
+        content = token.content
+        if parent_paragraph:
+            run = parent_paragraph.add_run(content)
+            run.font.name = '微软雅黑'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+            return run
+        return content
+
+    def render_strong(self, token, parent_paragraph):
+        run = self.render_inner(token, parent_paragraph)
+        if run: run.bold = True
+
+    def render_emphasis(self, token, parent_paragraph):
+        run = self.render_inner(token, parent_paragraph)
+        if run: run.italic = True
+        
+    def render_list(self, token):
+        for child in token.children:
+            self.render(child, list_style='List Bullet' if not token.start else 'List Number')
+
+    def render_list_item(self, token, list_style):
+        # 兼容性处理：不同版本的mistletoe结构可能细微不同
+        if hasattr(token, 'children') and len(token.children) > 0:
+            first_child = token.children[0]
+            # 检查是否为段落
+            if isinstance(first_child, block_token.Paragraph):
+                paragraph = self.doc.add_paragraph(style=list_style)
+                self.render_inner(first_child, paragraph)
             else:
-                summ.append({"产品": pn, "数量": pi['quantity'], "最低": "-", "最优": "-", "最高": "-", "价差": "-", "报价数": 0})
-        st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True)
+                # 直接渲染其他内容
+                for child in token.children:
+                    self.render(child)
 
-        all_d = []
-        for pn, pi in proj['products'].items():
-            for b in pi['bids']:
-                all_d.append({"产品": pn, "数量": pi['quantity'], "供应商": b['supplier'], "单价": b['price'], "总价": b['price']*pi['quantity'], "备注": b['remark'], "时间": b['time']})
-        if all_d:
-            out = io.BytesIO()
-            with pd.ExcelWriter(out) as writer: pd.DataFrame(all_d).to_excel(writer, index=False)
-            st.download_button("📥 导出Excel", out.getvalue(), "报价明细.xlsx")
+    def render_image(self, token, parent_paragraph):
+        url = token.src
+        alt_text = token.title if token.title else (token.children[0].content if token.children and hasattr(token.children[0], 'content') else "图片")
+        
+        try:
+            # 下载图片
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            image_stream = io.BytesIO(response.content)
+            
+            run = parent_paragraph.add_run()
+            run.add_picture(image_stream, width=Cm(14))
+            if alt_text:
+                parent_paragraph.add_run(f"\n{alt_text}").italic = True
+        except Exception:
+             run = parent_paragraph.add_run(f"[图片无法加载: {alt_text}]")
+             run.font.color.rgb = RGBColor(255, 0, 0)
 
-        st.markdown("---")
-        for pn, pi in proj['products'].items():
-            with st.container():
-                st.markdown(f"**📦 {pn}**")
-                if pi['bids']:
-                    df = pd.DataFrame(pi['bids'])
-                    c1, c2 = st.columns([1, 1.5])
-                    c1.line_chart(df[['datetime','price','supplier']], x='datetime', y='price', color='supplier', height=180)
-                    show_df = df[['supplier','price','remark','time']].copy()
-                    show_df['附件状态'] = ["✅" if b['file'] else "" for b in pi['bids']]
-                    show_df.columns = ['供应商', '单价', '备注', '时间', '附件状态']
-                    c2.dataframe(show_df, use_container_width=True, hide_index=True, height=180)
-                    file_tags = [get_styled_download_tag(b['file'], b['supplier']) for b in pi['bids'] if b['file']]
-                    if file_tags:
-                        st.caption("📎 附件下载:")
-                        st.markdown("".join(file_tags), unsafe_allow_html=True)
-                else: st.caption("暂无报价")
-                st.divider()
+    def render_table(self, token):
+        if not hasattr(token, 'children'): return
+        rows = len(token.children)
+        if rows == 0: return
+        cols = len(token.children[0].children)
+        
+        table = self.doc.add_table(rows=rows, cols=cols)
+        table.style = 'Table Grid' 
 
-if 'user' not in st.session_state: login_page()
-else:
-    if st.session_state.user_type == "admin": admin_dashboard()
-    else: supplier_dashboard()
+        for i, row_token in enumerate(token.children):
+            row = table.rows[i]
+            for j, cell_token in enumerate(row_token.children):
+                cell = row.cells[j]
+                cell._element.clear_content()
+                paragraph = cell.add_paragraph()
+                self.render_inner(cell_token, paragraph)
+
+    def render_inner(self, token, parent_paragraph=None):
+        if hasattr(token, 'children'):
+            last_run = None
+            for child in token.children:
+                if isinstance(child, span_token.RawText):
+                    last_run = self.render_raw_text(child, parent_paragraph)
+                elif isinstance(child, span_token.Strong):
+                    self.render_strong(child, parent_paragraph)
+                elif isinstance(child, span_token.Emphasis):
+                    self.render_emphasis(child, parent_paragraph)
+                elif isinstance(child, span_token.Image):
+                    self.render_image(child, parent_paragraph)
+            return last_run
+        return token.content
+
+# ==========================================
+# 界面逻辑
+# ==========================================
+st.set_page_config(page_title="Huamai 文档生成器", layout="wide", page_icon="📄")
+
+st.title("📄 Huamai 文档生成工具 (稳定版)")
+st.caption("v2.0 - 修复了导入错误，优化了表格和背景图支持")
+
+col1, col2 = st.columns([4, 6])
+
+with col1:
+    st.info("💡 提示：请确保你上传的图片是 A4 尺寸 (210x297mm)")
+    bg_file = st.file_uploader("1. 上传背景图 (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
+    generate_btn = st.button("🚀 生成 Word 文档", type="primary", use_container_width=True)
+
+with col2:
+    default_md = """# HUAMAI 产品规格书
+
+## 1. 产品简介
+本产品采用高品质材质...
+
+## 2. 技术参数
+| 指标 | 参数值 | 备注 |
+| :--- | :--- | :--- |
+| 阻抗 | 50 Ohms | 标准 |
+| 频率 | DC-6GHz | 宽频 |
+
+## 3. 测试图片
+![测试图](https://via.placeholder.com/150)
+"""
+    md_input = st.text_area("2. 输入 Markdown 内容", height=500, value=default_md)
+
+if generate_btn:
+    if not md_input.strip():
+        st.error("请输入内容！")
+    else:
+        with st.spinner("文档生成中..."):
+            try:
+                # 1. 准备文档
+                doc = Document()
+                if bg_file:
+                    image_stream = io.BytesIO(bg_file.getvalue())
+                    set_true_background(doc, image_stream)
+
+                # 2. 解析Markdown
+                renderer = DocxRenderer(doc)
+                doc_token = mistletoe.Document(md_input)
+                renderer.render(doc_token)
+                
+                # 3. 输出
+                doc_io = io.BytesIO()
+                doc.save(doc_io)
+                doc_io.seek(0)
+                
+                st.success("✅ 生成成功！")
+                st.download_button(
+                    label="📥 点击下载 .docx",
+                    data=doc_io,
+                    file_name="Huamai_Spec_Final.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    type="primary"
+                )
+            except Exception as e:
+                st.error(f"❌ 生成过程中出错: {e}")
+                import traceback
+                st.code(traceback.format_exc())
