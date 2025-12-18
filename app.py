@@ -10,65 +10,58 @@ try:
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     
-    # 显式导入 mistletoe 模块
     import mistletoe
     from mistletoe import block_token, span_token
     from mistletoe.base_renderer import BaseRenderer
     
 except ImportError as e:
     st.error(f"🚨 依赖库导入失败: {e}")
-    st.info("请检查 requirements.txt 是否包含: mistletoe==1.0.1")
     st.stop()
 
 # ==========================================
-# 核心功能修复区
+# 核心功能区
 # ==========================================
 
 def set_true_background(doc, image_stream):
-    """设置 Word 文档底层背景 (修复 rId 字符串问题)"""
+    """设置 Word 文档底层背景 (含 rId 修复)"""
     try:
         document_part = doc.part
-        
-        # [修复点 1] 获取关系 ID
-        # relate_to 可能直接返回字符串 ID (如 "rId4")，也可能返回对象
+        # 获取图片关联 ID
         rel_result = document_part.relate_to(image_stream, docx.opc.constants.RELATIONSHIP_TYPE.IMAGE)
         
+        # 兼容性处理：不同版本 python-docx 返回类型不同
         if isinstance(rel_result, str):
             r_id = rel_result
         elif hasattr(rel_result, 'rId'):
             r_id = rel_result.rId
         else:
-            r_id = str(rel_result) # 兜底策略
+            r_id = str(rel_result)
 
-        # 构造 VML XML (定义背景)
+        # 构造 VML XML
         vmldata = f"""<v:background id="_x0000_s1025" o:bwmode="white" fillcolor="white [3212]" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
         <v:fill r:id="{r_id}" type="frame"/>
         </v:background>"""
         
-        # 应用到所有章节
         for section in doc.sections:
             section_element = section._sectPr
-            # 避免重复添加
             if section_element.find(qn('v:background')) is None:
                 bg_element = OxmlElement.from_xml(vmldata)
                 section_element.insert(0, bg_element)
             
-            # [调整页边距] 配合你的左侧红色 Logo 条
-            # 稍微加大左边距，防止文字压在红条上
+            # 页边距调整 (避开左侧红色 Logo)
             section.top_margin = Cm(2.5)      
             section.bottom_margin = Cm(2.0)
-            section.left_margin = Cm(3.0)  # 左侧留宽一点
+            section.left_margin = Cm(3.0) 
             section.right_margin = Cm(2.0)
             
     except Exception as e:
         print(f"背景设置警告: {e}")
-        # 不抛出错误，以免阻断主流程，只是背景图可能失败
 
 class DocxRenderer(BaseRenderer):
-    """自定义 Markdown 渲染器 (修复 NoneType 错误)"""
+    """自定义 Markdown 渲染器"""
     def __init__(self, doc):
         self.doc = doc
-        # 设置中文字体
+        # 设置全局中文字体
         style = doc.styles['Normal']
         font = style.font
         font.name = '微软雅黑'
@@ -77,7 +70,6 @@ class DocxRenderer(BaseRenderer):
         super().__init__()
 
     def render_document(self, token):
-        # [修复点 2] 增加防空检查
         if hasattr(token, 'children') and token.children:
             for child in token.children:
                 self.render(child)
@@ -110,24 +102,35 @@ class DocxRenderer(BaseRenderer):
         run = self.render_inner(token, parent_paragraph)
         if run: run.italic = True
         
+    # --- 修复点：彻底重写列表渲染逻辑 ---
     def render_list(self, token):
+        # 1. 确定列表样式
+        list_style = 'List Number' if token.start else 'List Bullet'
+        
+        # 2. 遍历列表项 (List Items)
         if hasattr(token, 'children') and token.children:
-            for child in token.children:
-                self.render(child, list_style='List Bullet' if not token.start else 'List Number')
+            for list_item in token.children:
+                # 3. 直接在这里处理列表项，不再调用 self.render(..., style=...)
+                if hasattr(list_item, 'children') and list_item.children:
+                    # 获取列表项的第一个子元素（通常是段落）
+                    first_child = list_item.children[0]
+                    
+                    # 创建带样式的段落
+                    paragraph = self.doc.add_paragraph(style=list_style)
+                    
+                    # 渲染内容
+                    if isinstance(first_child, block_token.Paragraph):
+                        self.render_inner(first_child, paragraph)
+                    else:
+                        # 简单的兜底渲染
+                        self.render_inner(first_child, paragraph)
 
-    def render_list_item(self, token, list_style):
-        if hasattr(token, 'children') and token.children:
-            first_child = token.children[0]
-            if isinstance(first_child, block_token.Paragraph):
-                paragraph = self.doc.add_paragraph(style=list_style)
-                self.render_inner(first_child, paragraph)
-            else:
-                for child in token.children:
-                    self.render(child)
+    # render_list_item 不再需要被直接调用，逻辑已合并到 render_list 中以避免传参错误
+    def render_list_item(self, token): 
+        pass 
 
     def render_image(self, token, parent_paragraph):
         url = token.src
-        # 安全获取 title 或 alt
         alt_text = "图片"
         if hasattr(token, 'title') and token.title:
             alt_text = token.title
@@ -147,17 +150,10 @@ class DocxRenderer(BaseRenderer):
              run.font.color.rgb = RGBColor(255, 0, 0)
 
     def render_table(self, token):
-        # [修复点 3] 表格渲染的强壮性检查
-        if not hasattr(token, 'children') or not token.children: 
-            return
-            
+        if not hasattr(token, 'children') or not token.children: return
         rows = len(token.children)
         if rows == 0: return
-        
-        # 检查第一行是否存在且有子元素
-        if not hasattr(token.children[0], 'children') or not token.children[0].children:
-            return
-            
+        if not hasattr(token.children[0], 'children') or not token.children[0].children: return
         cols = len(token.children[0].children)
         
         table = self.doc.add_table(rows=rows, cols=cols)
@@ -167,14 +163,13 @@ class DocxRenderer(BaseRenderer):
             row = table.rows[i]
             if hasattr(row_token, 'children') and row_token.children:
                 for j, cell_token in enumerate(row_token.children):
-                    if j < len(row.cells): # 防止越界
+                    if j < len(row.cells):
                         cell = row.cells[j]
                         cell._element.clear_content()
                         paragraph = cell.add_paragraph()
                         self.render_inner(cell_token, paragraph)
 
     def render_inner(self, token, parent_paragraph=None):
-        # [核心修复] 递归渲染时的防空检查
         if hasattr(token, 'children') and token.children:
             last_run = None
             for child in token.children:
@@ -196,7 +191,7 @@ class DocxRenderer(BaseRenderer):
 # ==========================================
 st.set_page_config(page_title="Huamai 文档生成器", layout="wide", page_icon="📄")
 
-st.title("📄 Huamai 文档生成工具 (Fix v3.0)")
+st.title("📄 Huamai 文档生成工具 (最终修复版)")
 
 col1, col2 = st.columns([4, 6])
 
@@ -211,14 +206,15 @@ with col2:
 ## 1. 产品简介
 本产品采用高品质材质...
 
-## 2. 技术参数
+## 2. 列表测试
+* 特性 A
+* 特性 B
+
+## 3. 技术参数
 | 指标 | 参数值 | 备注 |
 | :--- | :--- | :--- |
 | 阻抗 | 50 Ohms | 标准 |
 | 频率 | DC-6GHz | 宽频 |
-
-## 3. 测试图片
-![示例图](https://via.placeholder.com/150)
 """
     md_input = st.text_area("Markdown 内容", height=500, value=default_md)
 
@@ -229,17 +225,14 @@ if generate_btn:
         with st.spinner("文档处理中..."):
             try:
                 doc = Document()
-                # 1. 应用背景
                 if bg_file:
                     image_stream = io.BytesIO(bg_file.getvalue())
                     set_true_background(doc, image_stream)
 
-                # 2. 解析内容
                 renderer = DocxRenderer(doc)
                 doc_token = mistletoe.Document(md_input)
                 renderer.render(doc_token)
                 
-                # 3. 导出
                 doc_io = io.BytesIO()
                 doc.save(doc_io)
                 doc_io.seek(0)
@@ -253,6 +246,6 @@ if generate_btn:
                     type="primary"
                 )
             except Exception as e:
-                st.error(f"❌ 依然报错: {e}")
+                st.error(f"❌ 错误: {e}")
                 import traceback
                 st.code(traceback.format_exc())
