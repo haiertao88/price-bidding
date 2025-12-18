@@ -92,7 +92,7 @@ def setup_page_layout(doc, image_stream=None):
                 st.warning(f"背景图XML解析失败: {e}")
 
 # ==========================================
-# Markdown 渲染器
+# Markdown 渲染器（兼容所有 mistletoe 版本）
 # ==========================================
 class DocxRenderer(BaseRenderer):
     def __init__(self, doc):
@@ -147,26 +147,46 @@ class DocxRenderer(BaseRenderer):
             run.italic = True
         
     def render_list(self, token):
-        # 区分有序/无序列表
-        if isinstance(token, block_token.OrderedList):
-            list_style = 'List Number'
-        else:
-            list_style = 'List Bullet'
+        """
+        兼容所有 mistletoe 版本的列表渲染
+        - 旧版本：List 类 + start 属性
+        - 新版本：OrderedList/UnorderedList 类
+        """
+        # 判定是否为有序列表（终极兼容方案）
+        is_ordered = False
         
+        # 适配新版本 mistletoe（有 OrderedList 类）
+        if hasattr(block_token, 'OrderedList'):
+            is_ordered = isinstance(token, block_token.OrderedList)
+        # 适配旧版本 mistletoe（只有 List 类，通过 start 属性判断）
+        else:
+            is_ordered = hasattr(token, 'start') and token.start is not None
+        
+        # 设置列表样式（有序=数字，无序=圆点）
+        list_style = 'List Number' if is_ordered else 'List Bullet'
+        
+        # 渲染列表项
         if hasattr(token, 'children') and token.children:
             for list_item in token.children:
                 if hasattr(list_item, 'children') and list_item.children:
                     paragraph = self.doc.add_paragraph(style=list_style)
-                    # 渲染列表项内容
+                    # 递归渲染列表项内容（支持嵌套）
                     self.render_list_item(list_item, paragraph)
 
     def render_list_item(self, token, parent_paragraph=None):
-        """处理列表项（支持嵌套）"""
+        """处理列表项（兼容所有版本，支持嵌套）"""
         if not parent_paragraph:
             parent_paragraph = self.doc.add_paragraph()
         
         for child in token.children:
-            if isinstance(child, block_token.List):
+            # 兼容所有版本的列表类判断
+            list_classes = [block_token.List]
+            if hasattr(block_token, 'OrderedList'):
+                list_classes.append(block_token.OrderedList)
+            if hasattr(block_token, 'UnorderedList'):
+                list_classes.append(block_token.UnorderedList)
+            
+            if isinstance(child, tuple(list_classes)):
                 self.render_list(child)  # 递归渲染嵌套列表
             else:
                 self.render_inner(child, parent_paragraph)
@@ -289,7 +309,12 @@ with col2:
 - 表格渲染
 - 自定义背景图
 
-## 4. 示例图片
+## 4. 有序列表示例
+1. 第一步：输入Markdown内容
+2. 第二步：上传背景图（可选）
+3. 第三步：点击生成文档
+
+## 5. 示例图片
 ![示例图片](https://picsum.photos/800/600)
 """
     md_input = st.text_area("Markdown 内容", height=500, value=default_md)
