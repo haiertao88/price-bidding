@@ -10,6 +10,8 @@ try:
     import docx
     from docx import Document
     from docx.shared import Pt, Cm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import parse_xml  
     from docx.oxml.ns import qn, nsmap 
     
@@ -99,13 +101,56 @@ class DocxRenderer(BaseRenderer):
         self.doc = doc
         self.font_name = get_available_font()  # 动态获取字体
         
-        # 设置默认样式
-        style = doc.styles['Normal']
-        font = style.font
-        font.name = self.font_name
-        font.size = Pt(10.5)
-        font._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
+        # 设置默认样式（正文）
+        normal_style = doc.styles['Normal']
+        normal_font = normal_style.font
+        normal_font.name = self.font_name
+        normal_font.size = Pt(10.5)
+        normal_font._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
+        normal_style.paragraph_format.line_spacing = 1.5  # 正文行间距1.5倍
+        
+        # 自定义标题样式（区分不同级别）
+        self.setup_heading_styles()
+        
         super().__init__()
+
+    def setup_heading_styles(self):
+        """自定义标题样式，区分标题和正文"""
+        # 一级标题
+        h1_style = self.doc.styles.add_style('Custom Heading 1', docx.enum.style.WD_STYLE_TYPE.PARAGRAPH)
+        h1_font = h1_style.font
+        h1_font.name = self.font_name
+        h1_font.size = Pt(16)
+        h1_font.bold = True
+        h1_font.color.rgb = RGBColor(0, 51, 102)  # 深蓝色
+        h1_font._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
+        h1_style.paragraph_format.space_before = Pt(24)
+        h1_style.paragraph_format.space_after = Pt(12)
+        h1_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT  # 左对齐
+        
+        # 二级标题
+        h2_style = self.doc.styles.add_style('Custom Heading 2', docx.enum.style.WD_STYLE_TYPE.PARAGRAPH)
+        h2_font = h2_style.font
+        h2_font.name = self.font_name
+        h2_font.size = Pt(14)
+        h2_font.bold = True
+        h2_font.color.rgb = RGBColor(0, 76, 153)  # 中蓝色
+        h2_font._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
+        h2_style.paragraph_format.space_before = Pt(18)
+        h2_style.paragraph_format.space_after = Pt(9)
+        h2_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        # 三级标题
+        h3_style = self.doc.styles.add_style('Custom Heading 3', docx.enum.style.WD_STYLE_TYPE.PARAGRAPH)
+        h3_font = h3_style.font
+        h3_font.name = self.font_name
+        h3_font.size = Pt(12)
+        h3_font.bold = True
+        h3_font.color.rgb = RGBColor(0, 102, 204)  # 浅蓝色
+        h3_font._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
+        h3_style.paragraph_format.space_before = Pt(15)
+        h3_style.paragraph_format.space_after = Pt(6)
+        h3_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     def render_document(self, token):
         if hasattr(token, 'children') and token.children:
@@ -113,18 +158,30 @@ class DocxRenderer(BaseRenderer):
                 self.render(child)
 
     def render_heading(self, token):
+        """渲染标题，应用自定义样式"""
         level = token.level
         text = self.render_inner(token)
-        p = self.doc.add_heading(text, level=level)
-        p.paragraph_format.space_before = Pt(12)
-        p.paragraph_format.space_after = Pt(6)
-        # 设置标题字体
+        p = self.doc.add_paragraph(text)
+        
+        # 根据级别应用不同样式
+        if level == 1:
+            p.style = self.doc.styles['Custom Heading 1']
+        elif level == 2:
+            p.style = self.doc.styles['Custom Heading 2']
+        elif level >= 3:
+            p.style = self.doc.styles['Custom Heading 3']
+        
+        # 标题文字单独设置（防止样式失效）
         for run in p.runs:
             run.font.name = self.font_name
             run._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
 
     def render_paragraph(self, token):
+        """渲染正文段落，区分标题样式"""
         paragraph = self.doc.add_paragraph()
+        paragraph.style = self.doc.styles['Normal']  # 强制应用正文样式
+        paragraph.paragraph_format.space_before = Pt(6)
+        paragraph.paragraph_format.space_after = Pt(6)
         self.render_inner(token, paragraph)
 
     def render_raw_text(self, token, parent_paragraph=None):
@@ -132,6 +189,7 @@ class DocxRenderer(BaseRenderer):
         if parent_paragraph:
             run = parent_paragraph.add_run(content)
             run.font.name = self.font_name
+            run.font.size = Pt(10.5)  # 正文固定字号
             run._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
             return run
         return content
@@ -170,6 +228,8 @@ class DocxRenderer(BaseRenderer):
             for list_item in token.children:
                 if hasattr(list_item, 'children') and list_item.children:
                     paragraph = self.doc.add_paragraph(style=list_style)
+                    # 列表项应用正文样式
+                    paragraph.style = self.doc.styles['Normal']
                     # 递归渲染列表项内容（支持嵌套）
                     self.render_list_item(list_item, paragraph)
 
@@ -177,6 +237,7 @@ class DocxRenderer(BaseRenderer):
         """处理列表项（兼容所有版本，支持嵌套）"""
         if not parent_paragraph:
             parent_paragraph = self.doc.add_paragraph()
+            parent_paragraph.style = self.doc.styles['Normal']
         
         for child in token.children:
             # 兼容所有版本的列表类判断
@@ -221,6 +282,7 @@ class DocxRenderer(BaseRenderer):
             caption = parent_paragraph.add_run(f"\n{alt_text}")
             caption.italic = True
             caption.font.name = self.font_name
+            caption.font.size = Pt(9)
 
         except Exception as e:
             err_run = parent_paragraph.add_run(f"[图片加载失败: {alt_text} - {str(e)}]")
@@ -230,6 +292,7 @@ class DocxRenderer(BaseRenderer):
                 image_stream.close()
 
     def render_table(self, token):
+        """渲染表格，设置居中+美化样式"""
         if not hasattr(token, 'children') or not token.children: 
             return
         rows = len(token.children)
@@ -241,22 +304,52 @@ class DocxRenderer(BaseRenderer):
             return
         cols = len(first_row.children)
         
+        # 创建表格并设置居中
         table = self.doc.add_table(rows=rows, cols=cols)
-        table.style = 'Table Grid' 
-
+        table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER  # 表格整体居中
+        table.autofit = True  # 自动适配宽度
+        
+        # 设置表头样式
+        header_row = table.rows[0]
+        for cell in header_row.cells:
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER  # 表头文字居中
+            for run in cell.paragraphs[0].runs:
+                run.font.bold = True
+                run.font.color.rgb = RGBColor(255, 255, 255)  # 白色文字
+                run.font.name = self.font_name
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
+            # 表头背景色（深蓝色）
+            cell_shading = parse_xml(r'<w:shd xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:fill="003366"/>')
+            cell._tc.get_or_add_tcPr().append(cell_shading)
+        
+        # 填充表格内容并设置居中
         for i, row_token in enumerate(token.children):
             row = table.rows[i]
+            # 设置行高
+            row.height = Pt(24)
+            row.height_rule = docx.enum.table.WD_ROW_HEIGHT_RULE.AT_LEAST
+            
             if hasattr(row_token, 'children') and row_token.children:
                 for j, cell_token in enumerate(row_token.children):
                     if j < len(row.cells):
                         cell = row.cells[j]
                         cell._element.clear_content()
                         paragraph = cell.add_paragraph()
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  # 单元格文字居中
                         self.render_inner(cell_token, paragraph)
-                        # 设置表格字体
+                        
+                        # 设置单元格字体
                         for run in paragraph.runs:
                             run.font.name = self.font_name
+                            run.font.size = Pt(10)
                             run._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
+                            
+                            # 非表头行设置浅灰色背景
+                            if i > 0:
+                                if j % 2 == 0:
+                                    cell_shading = parse_xml(r'<w:shd xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:fill="F5F5F5"/>')
+                                    cell._tc.get_or_add_tcPr().append(cell_shading)
 
     def render_inner(self, token, parent_paragraph=None):
         if hasattr(token, 'children') and token.children:
@@ -279,7 +372,7 @@ class DocxRenderer(BaseRenderer):
 # 界面逻辑
 # ==========================================
 st.set_page_config(page_title="Huamai 文档生成器", layout="wide", page_icon="📄")
-st.title("📄 Huamai 文档生成工具 (V5.2 最终修正)")
+st.title("📄 Huamai 文档生成工具 (V5.3 样式优化版)")
 
 col1, col2 = st.columns([4, 6])
 
@@ -292,21 +385,27 @@ with col2:
     default_md = """# 产品规格说明书
 
 ## 1. 简介
-本产品完全符合 A4 打印标准，页边距已严格校准。
+本产品完全符合 A4 打印标准，页边距已严格校准，标题和正文样式区分明显，表格支持居中显示。
 
 ## 2. 详细参数
 | 项目 | 规格 | 说明 |
 | :--- | :--- | :--- |
 | 尺寸 | A4 | 标准纸张 |
 | 边距 | 定制 | 72/72/54/54 pt |
+| 标题1 | 16号字 | 深蓝色加粗 |
+| 标题2 | 14号字 | 中蓝色加粗 |
+| 正文 | 10.5号字 | 常规样式 |
 
 ## 3. 功能列表
 - 支持Markdown语法
-  - 标题、段落
+  - 多级标题（样式区分）
   - 粗体、斜体
   - 有序/无序列表
+- 表格居中显示
+  - 表头背景色
+  - 单元格文字居中
+  - 奇偶行隔行变色
 - 图片插入（网络/本地）
-- 表格渲染
 - 自定义背景图
 
 ## 4. 有序列表示例
@@ -348,11 +447,11 @@ if generate_btn:
                 if bg_stream:
                     bg_stream.close()
                 
-                st.success("✅ 文档生成成功！")
+                st.success("✅ 文档生成成功！（已优化标题样式和表格居中）")
                 st.download_button(
                     label="📥 下载最终文档",
                     data=doc_io,
-                    file_name="Huamai_Final_Fixed.docx",
+                    file_name="Huamai_Styled_Final.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     type="primary",
                     use_container_width=True
