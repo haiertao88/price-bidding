@@ -1,468 +1,331 @@
 import streamlit as st
-import pandas as pd
-import io
-import random
-import string
-import uuid
-import base64
-from datetime import datetime, timedelta
-import hashlib
+import streamlit.components.v1 as components
 
-# --- 页面配置 ---
-st.set_page_config(page_title="华脉招采平台", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="3D 智能堆码专家 V10.0", layout="wide", initial_sidebar_state="collapsed")
 
-# --- 🎨 CSS 样式深度定制 (V2.3 适配附件上传UI) ---
+# 隐藏 Streamlit 边栏及设置
 st.markdown("""
     <style>
-        /* 1. 全局布局紧凑化 */
-        .block-container {
-            padding-top: 2rem !important;
-            padding-bottom: 2rem !important;
-            padding-left: 2rem !important;
-            padding-right: 2rem !important;
-        }
-        div[data-testid="stVerticalBlock"] { gap: 0.6rem !important; }
-        
-        /* 2. 背景与字体优化 */
-        .stApp { background-color: #f4f6f9; }
-        
-        /* 标题修复 */
-        h1, h2, h3, h4 {
-            line-height: 1.6 !important;
-            padding-top: 10px !important;
-            padding-bottom: 10px !important;
-            font-family: "Source Sans Pro", "Microsoft YaHei", "微软雅黑", sans-serif !important;
-        }
-        
-        /* 3. 卡片式容器 */
-        .ui-card {
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            border: 1px solid #e1e4e8;
-            margin-bottom: 15px;
-        }
-
-        /* 4. 优化 st.code (账号密码复制) */
-        .stCode { font-size: 14px !important; margin-bottom: 0px !important; }
-        div[data-testid="stCodeBlock"] > pre {
-            padding: 0.4rem 0.8rem !important;
-            border-radius: 4px !important;
-            background-color: #f1f3f5 !important;
-            border: 1px solid #dee2e6 !important;
-        }
-
-        /* 5. 文件上传组件极简风 (适配狭窄空间) */
-        [data-testid="stFileUploader"] { padding: 0px !important; }
-        [data-testid="stFileUploader"] section { padding: 0px !important; min-height: 0px !important; }
-        [data-testid="stFileUploader"] button {
-            border: 1px dashed #d1d5db;
-            color: #4b5563;
-            background-color: #f9fafb;
-            padding: 4px 10px;
-            font-size: 12px;
-            width: 100%;
-        }
-        [data-testid="stFileUploaderDropzoneInstructions"] { display: none; }
-        [data-testid="stFileUploader"] small { display: none; }
-
-        /* 6. 表格与输入框 */
-        .stDataFrame { border: 1px solid #eee; border-radius: 6px; }
-        .stTextInput > div > div > input { padding: 8px 10px; font-size: 14px; }
-        
-        /* 7. 自定义下载标签 */
-        .file-tag {
-            display: inline-block; background-color: #e3f2fd; color: #0d47a1;
-            padding: 2px 8px; border-radius: 4px; border: 1px solid #bbdefb;
-            text-decoration: none; font-size: 12px; margin-right: 5px; cursor: pointer;
-            vertical-align: middle;
-        }
-        .file-tag:hover { background-color: #bbdefb; }
-        
-        /* 隐藏默认菜单 */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
+        #MainMenu, header, footer {visibility: hidden;}
+        .block-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; overflow: hidden !important; }
+        iframe { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; border: none !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 全局数据初始化 ---
-@st.cache_resource
-def init_global_data():
-    return {
-        "projects": {},
-        "suppliers": {
-            "GYSA": {"contact": "张经理", "phone": "13800138000", "job": "销售总监", "type": "光纤光缆", "address": "江苏省南京市江宁区xxx号"},
-            "GYSB": {"contact": "李工", "phone": "13900139000", "job": "技术支持", "type": "网络机柜", "address": "江苏省苏州市工业园区xxx号"},
-            "GYSC": {"contact": "王总", "phone": "13700137000", "job": "总经理", "type": "综合布线", "address": "上海市浦东新区xxx号"}
+html_code = r"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>3D 智能堆码专家 V10.0 - MaxRects 引擎</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100vh; overflow: hidden; font-family: "Microsoft YaHei", sans-serif; }
+        body { display: flex; background: #f0f2f5; }
+        #sidebar { width: 340px; background: white; border-right: 1px solid #ddd; padding: 15px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; z-index: 10; }
+        #viewport { flex: 1; position: relative; background: #eef2f3; }
+        .group-title { font-size: 13px; font-weight: bold; color: #333; border-left: 4px solid #3498db; padding-left: 8px; margin-top: 10px; }
+        .input-row { display: flex; gap: 8px; }
+        .input-item { flex: 1; display: flex; flex-direction: column; font-size: 11px; }
+        input { padding: 6px; border: 1px solid #ccc; border-radius: 4px; margin-top: 2px; }
+        button { padding: 10px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; font-size: 12px; transition: 0.2s; }
+        .btn-main { background: #3498db; color: white; }
+        .btn-anim { background: #9b59b6; color: white; }
+        .btn-pdf { background: #27ae60; color: white; }
+        .stats-card { background: #2c3e50; color: white; padding: 12px; border-radius: 8px; font-size: 12px; }
+        #loading { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); color:white; display:none; flex-direction:column; justify-content:center; align-items:center; z-index:10000; }
+        
+        /* PDF 隐藏模板 */
+        #report-tpl { position: absolute; left: -9999px; width: 800px; background: white; padding: 30px; }
+        .rpt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+<div id="loading"><p id="loadText">正在处理...</p></div>
+
+<div id="sidebar">
+    <h3 style="margin:0; color:#2c3e50;">📦 堆码专家 V10.0</h3>
+    <div class="stats-card">
+        <div>最佳装载方案: <b id="stCount">0</b> pcs</div>
+        <div>利用率: <b id="stEff">0%</b></div>
+        <div id="stMode" style="font-size:10px; color:#bdc3c7; margin-top:5px;"></div>
+    </div>
+
+    <div class="group-title">1. 外箱配置</div>
+    <div class="input-row">
+        <div class="input-item">L<input type="number" id="bL" value="400"></div>
+        <div class="input-item">W<input type="number" id="bW" value="300"></div>
+        <div class="input-item">H<input type="number" id="bH" value="300"></div>
+    </div>
+    <div class="input-row">
+        <div class="input-item">壁厚(mm)<input type="number" id="wall" value="4"></div>
+        <div class="input-item">膨胀(mm)<input type="number" id="bulge" value="0"></div>
+    </div>
+
+    <div class="group-title">2. 内件配置</div>
+    <div class="input-row">
+        <div class="input-item">长<input type="number" id="iL" value="180"></div>
+        <div class="input-item">宽<input type="number" id="iW" value="120"></div>
+        <div class="input-item">高<input type="number" id="iH" value="100"></div>
+    </div>
+
+    <button class="btn-main" onclick="runMaxRectsEngine()">执行 MaxRects 智能计算</button>
+    <button class="btn-anim" onclick="startAnim()">🎬 演示装载</button>
+    <button class="btn-pdf" onclick="exportPDF()">📄 导出详细报告</button>
+    <button style="background:#95a5a6; color:white;" onclick="isOpen=!isOpen">开启/关闭纸箱</button>
+</div>
+
+<div id="viewport"></div>
+
+<div id="report-tpl">
+    <h1 style="text-align:center; color:#2c3e50;">智能装箱技术方案报告</h1>
+    <hr>
+    <div class="rpt-grid" id="rptInfo"></div>
+    <div class="rpt-grid">
+        <div style="text-align:center;"><img id="rImg1" style="width:100%; border:1px solid #ddd;"><p>空箱标注视图</p></div>
+        <div style="text-align:center;"><img id="rImg2" style="width:100%; border:1px solid #ddd;"><p>满载渲染视图</p></div>
+    </div>
+    <h3>装载说明：</h3>
+    <p>本方案采用 <b>Maximal Rectangles (极大矩形)</b> 算法。该算法通过实时维护空间坐标系中的最大可用矩形区域，消除了传统断头台算法切割带来的空间浪费，能更有效地压榨箱体边缘空间。</p>
+</div>
+
+<script>
+    let scene, camera, renderer, controls, itemsGroup, boxGroup, labelGroup, flaps=[];
+    let isOpen = false, isAnimating = false, animIndex = 0, animQueue = [];
+    const layerColors = [0x3498db, 0xe67e22, 0x2ecc71, 0xe74c3c, 0x9b59b6];
+
+    // --- 【算法核心】Maximal Rectangles 极大矩形算法 ---
+    
+    function solveMaxRects(width, height, itemL, itemW) {
+        let freeRects = [{x: 0, y: 0, w: width, h: height}];
+        let placedItems = [];
+
+        while (true) {
+            let bestRectIdx = -1;
+            let bestScore = -Infinity;
+
+            // 寻找最适合当前物品的矩形 (Best Short Side Fit)
+            for (let i = 0; i < freeRects.length; i++) {
+                let r = freeRects[i];
+                if (r.w >= itemL && r.h >= itemW) {
+                    let score = Math.min(r.w - itemL, r.h - itemW);
+                    if (score > bestScore) { bestScore = score; bestRectIdx = i; }
+                }
+            }
+
+            if (bestRectIdx === -1) break;
+
+            let target = freeRects[bestRectIdx];
+            let newItem = {x: target.x, y: target.y, w: itemL, h: itemW};
+            placedItems.push(newItem);
+
+            // 更新所有受影响的空闲矩形
+            let newFreeRects = [];
+            for (let i = 0; i < freeRects.length; i++) {
+                let r = freeRects[i];
+                // 如果相交，则切割
+                if (!(newItem.x >= r.x + r.w || newItem.x + newItem.w <= r.x || newItem.y >= r.y + r.h || newItem.y + newItem.h <= r.y)) {
+                    // 切割逻辑：产生上下左右四个可能的子矩形
+                    if (newItem.x > r.x) newFreeRects.push({x: r.x, y: r.y, w: newItem.x - r.x, h: r.h});
+                    if (newItem.x + newItem.w < r.x + r.w) newFreeRects.push({x: newItem.x + newItem.w, y: r.y, w: r.x + r.w - (newItem.x + newItem.w), h: r.h});
+                    if (newItem.y > r.y) newFreeRects.push({x: r.x, y: r.y, w: r.w, h: newItem.y - r.y});
+                    if (newItem.y + newItem.h < r.y + r.h) newFreeRects.push({x: r.x, y: newItem.y + newItem.h, w: r.w, h: r.y + r.h - (newItem.y + newItem.h)});
+                } else {
+                    newFreeRects.push(r);
+                }
+            }
+            
+            // 去重并清除包含关系的矩形
+            freeRects = cleanFreeRects(newFreeRects);
         }
+        return placedItems;
     }
 
-global_data = init_global_data()
-
-# --- 工具函数 ---
-def generate_random_code(length=6):
-    return ''.join(random.choices(string.digits, k=length))
-
-def file_to_base64(uploaded_file, max_size=200*1024*1024):
-    if uploaded_file is None: return None
-    file_size = uploaded_file.size
-    if file_size > max_size:
-        st.error(f"文件过大（{file_size/1024/1024:.1f}MB），最大支持200MB")
-        return None
-    try:
-        bytes_data = uploaded_file.getvalue()
-        return {
-            "name": uploaded_file.name,
-            "type": uploaded_file.type,
-            "data": base64.b64encode(bytes_data).decode('utf-8'),
-            "size": file_size,
-            "hash": hashlib.md5(bytes_data).hexdigest()
+    function cleanFreeRects(rects) {
+        let result = [];
+        for (let i = 0; i < rects.length; i++) {
+            let isContained = false;
+            for (let j = 0; j < rects.length; j++) {
+                if (i === j) continue;
+                let a = rects[i], b = rects[j];
+                if (a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h) {
+                    isContained = true; break;
+                }
+            }
+            if (!isContained) result.push(rects[i]);
         }
-    except Exception as e:
-        st.error(f"文件处理失败：{str(e)}")
-        return None
+        return result;
+    }
 
-def get_styled_download_tag(file_dict, label_prefix=""):
-    if not isinstance(file_dict, dict) or not file_dict.get('data'): return ""
-    display_label = f"📎 {label_prefix} {file_dict['name']}" if label_prefix else f"📎 {file_dict['name']}"
-    return f'<a href="data:{file_dict["type"]};base64,{file_dict["data"]}" download="{file_dict["name"]}" class="file-tag" target="_blank">{display_label}</a>'
-
-def safe_parse_deadline(deadline_str):
-    if not isinstance(deadline_str, str): return datetime.now() + timedelta(hours=1)
-    for fmt in ["%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
-        try: return datetime.strptime(deadline_str, fmt)
-        except ValueError: continue
-    return datetime.now() + timedelta(hours=1)
-
-# --- 登录页面 ---
-def render_login_page():
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        st.markdown('<div class="ui-card">', unsafe_allow_html=True)
-        st.markdown("<h2 style='text-align: center; color: #1e293b; margin-top:0;'>🔐 华脉招采平台</h2>", unsafe_allow_html=True)
-        st.markdown("<div style='text-align: center; color: #64748b; font-size: 0.9em; margin-bottom: 20px;'>专业 · 高效 · 透明</div>", unsafe_allow_html=True)
+    // --- 智能引擎：6姿态搜索 ---
+    function runMaxRectsEngine() {
+        const bL = parseFloat(document.getElementById('bL').value),
+              bW = parseFloat(document.getElementById('bW').value),
+              bH = parseFloat(document.getElementById('bH').value),
+              wall = parseFloat(document.getElementById('wall').value),
+              bulge = parseFloat(document.getElementById('bulge').value);
         
-        username = st.text_input("用户名", placeholder="请输入用户名").strip()
-        password = st.text_input("密码", type="password", placeholder="请输入密码").strip()
+        const iL = parseFloat(document.getElementById('iL').value),
+              iW = parseFloat(document.getElementById('iW').value),
+              iH = parseFloat(document.getElementById('iH').value);
+
+        const rL = bL - wall * 2 + bulge, rW = bW - wall * 2 + bulge, rH = bH - wall * 2 + bulge;
+
+        // 定义 6 种旋转姿态
+        const orientations = [
+            {l: iL, w: iW, h: iH, n: "平放"}, {l: iL, w: iH, h: iW, n: "侧放(长)"}, 
+            {l: iW, w: iL, h: iH, n: "平放(转)"}, {l: iW, w: iH, h: iL, n: "立放(宽)"},
+            {l: iH, w: iL, h: iW, n: "侧放(高)"}, {l: iH, w: iW, h: iL, n: "立放(高)"}
+        ];
+
+        let best = { total: -1 };
+        orientations.forEach(o => {
+            const layerItems = solveMaxRects(rL, rW, o.l, o.w);
+            const layers = Math.floor(rH / o.h);
+            const total = layerItems.length * layers;
+            if (total > best.total) {
+                best = { total, layers, items: layerItems, config: o };
+            }
+        });
+
+        document.getElementById('stMode').innerText = `最优摆放姿态：${best.config.n} (${best.config.l}x${best.config.w}x${best.config.h})`;
+        render3D(bL, bW, bH, wall, best);
+    }
+
+    function render3D(vL, vW, vH, wall, data) {
+        boxGroup.clear(); itemsGroup.clear();
+        const mat = new THREE.MeshPhongMaterial({color: 0xd2a679, transparent:true, opacity:0.9, side: THREE.DoubleSide});
+        const add=(g,x,y,z)=> { const m=new THREE.Mesh(g,mat); m.position.set(x,y,z); boxGroup.add(m); return m; };
         
-        st.markdown("<br>", unsafe_allow_html=True)
+        add(new THREE.BoxGeometry(vL, wall, vW), 0, 0, 0); // 底
+        add(new THREE.BoxGeometry(vL, vH, wall), 0, vH/2, -vW/2); // 后
+        add(new THREE.BoxGeometry(vL, vH, wall), 0, vH/2, vW/2); // 前
+        add(new THREE.BoxGeometry(wall, vH, vW), -vL/2, vH/2, 0); // 左
+        add(new THREE.BoxGeometry(wall, vH, vW), vL/2, vH/2, 0); // 右
+
+        // 盖子
+        const addFlap=(w,d,px,pz,ax,dir)=>{
+            const pivot = new THREE.Group(); pivot.position.set(px, vH, pz);
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, 2, d), mat);
+            m.position.z = ax==='x'?d/2*-dir : 0;
+            pivot.add(m); boxGroup.add(pivot); flaps.push({pivot, ax, dir, ang:0});
+        };
+        addFlap(vL, vW/2, 0, vW/2, 'x', 1); addFlap(vL, vW/2, 0, -vW/2, 'x', -1);
+
+        const sX = -(vL - wall * 2) / 2, sZ = -(vW - wall * 2) / 2;
+        data.items.forEach((it, idx) => {
+            for(let y=0; y<data.layers; y++) {
+                const g = new THREE.BoxGeometry(data.config.l-0.5, data.config.h-0.5, data.config.w-0.5);
+                const m = new THREE.Mesh(g, new THREE.MeshPhongMaterial({color: layerColors[y % 5]}));
+                m.position.set(sX + it.x + data.config.l/2, y*data.config.h + data.config.h/2 + wall/2, sZ + it.y + data.config.w/2);
+                m.userData.finalY = m.position.y;
+                m.userData.settled = true;
+                itemsGroup.add(m);
+            }
+        });
+
+        document.getElementById('stCount').innerText = data.total;
+        document.getElementById('stEff').innerText = (data.total * data.config.l * data.config.w * data.config.h / (vL*vW*vH) * 100).toFixed(1) + "%";
+    }
+
+    function startAnim() {
+        isAnimating = true; animIndex = 0;
+        animQueue = itemsGroup.children.slice().sort((a,b) => a.position.y - b.position.y);
+        animQueue.forEach(m => { m.visible = false; m.position.y += 300; m.userData.settled = false; });
+        isOpen = true;
+    }
+
+    async function exportPDF() {
+        document.getElementById('loading').style.display='flex';
+        document.getElementById('loadText').innerText="正在生成报告视图...";
         
-        if st.button("立即登录", type="primary", use_container_width=True):
-            if username == "HUAMAI" and password == "HUAMAI888":
-                st.session_state["user_type"] = "admin"
-                st.session_state["user"] = username
-                st.rerun()
-            else:
-                login_success = False
-                for pid, pdata in global_data["projects"].items():
-                    codes = pdata.get("codes", {})
-                    if username in codes and codes[username] == password:
-                        st.session_state["user_type"] = "supplier"
-                        st.session_state["user"] = username
-                        st.session_state["project_id"] = pid
-                        login_success = True
-                        st.rerun()
-                        break
-                if not login_success:
-                    st.error("❌ 用户名或密码错误")
-        st.markdown('</div>', unsafe_allow_html=True)
+        itemsGroup.visible = false; renderer.render(scene, camera);
+        document.getElementById('rImg1').src = renderer.domElement.toDataURL();
+        itemsGroup.visible = true; renderer.render(scene, camera);
+        document.getElementById('rImg2').src = renderer.domElement.toDataURL();
 
-# --- 供应商端页面 ---
-def render_supplier_dashboard():
-    if "user" not in st.session_state: st.rerun()
-    
-    supplier_name = st.session_state["user"]
-    project_id = st.session_state["project_id"]
-    project_data = global_data["projects"].get(project_id)
-    
-    if not project_data:
-        st.error("项目已结束或不存在"); return
-
-    deadline = safe_parse_deadline(project_data.get("deadline", ""))
-    now = datetime.now()
-    is_closed = now > deadline
-    time_str = str(deadline - now).split('.')[0] if not is_closed else "已结束"
-
-    # 头部卡片
-    st.markdown(f"""
-    <div class="ui-card" style="border-left: 5px solid #3b82f6;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-                <h3 style="margin:0;">👤 {supplier_name} | 正在报价</h3>
-                <div style="color:#666; margin-top:5px;">📋 项目：{project_data.get('name')}</div>
+        document.getElementById('rptInfo').innerHTML = `
+            <div style="padding:10px;">
+                <p><b>装箱总数:</b> ${document.getElementById('stCount').innerText} pcs</p>
+                <p><b>空间效率:</b> ${document.getElementById('stEff').innerText}</p>
             </div>
-            <div style="text-align:right;">
-                <div style="font-weight:bold; font-size:1.2em; color: {'#ef4444' if is_closed else '#10b981'};">
-                    {'🚫 报价已截止' if is_closed else f'⏳ 剩余时间: {time_str}'}
-                </div>
+            <div style="padding:10px;">
+                <p><b>纸箱尺寸:</b> ${document.getElementById('bL').value}x${document.getElementById('bW').value}x${document.getElementById('bH').value}</p>
+                <p><b>内盒尺寸:</b> ${document.getElementById('iL').value}x${document.getElementById('iW').value}x${document.getElementById('iH').value}</p>
             </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_l, col_m, col_r = st.columns([5, 1, 1])
-    with col_m:
-        if st.button("🔄 刷新", use_container_width=True): st.rerun()
-    with col_r:
-        if st.button("退出", use_container_width=True):
-            st.session_state.clear(); st.rerun()
+        `;
 
-    # 产品列表
-    products = project_data.get("products", {})
-    if not products: st.info("暂无报价产品"); return
+        setTimeout(async () => {
+            const canvas = await html2canvas(document.getElementById('report-tpl'), {scale:2});
+            const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+            pdf.addImage(canvas.toDataURL('image/jpeg'), 'JPEG', 0, 0, 210, 297);
+            pdf.save('装箱技术方案V10.pdf');
+            document.getElementById('loading').style.display='none';
+        }, 500);
+    }
 
-    if "submit_lock" not in st.session_state: st.session_state["submit_lock"] = {}
-
-    for p_name, p_info in products.items():
-        with st.container():
-            st.markdown(f'<div class="ui-card">', unsafe_allow_html=True)
-            
-            # 产品标题行 (显示附件下载)
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                st.markdown(f"**📦 {p_name}** <span style='color:#666; font-size:0.9em'>({p_info.get('desc','')})</span>", unsafe_allow_html=True)
-                # --- 核心修改：显示甲方上传的规格书 ---
-                if p_info.get("admin_file"):
-                    st.markdown(get_styled_download_tag(p_info["admin_file"], "📥 下载规格书/图纸"), unsafe_allow_html=True)
-                # ----------------------------------
-            with c2:
-                st.markdown(f"<div style='text-align:right; font-weight:bold;'>需求数量: {p_info['quantity']}</div>", unsafe_allow_html=True)
-            
-            st.markdown("<hr style='margin: 10px 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
-
-            # 报价表单
-            with st.form(key=f"form_{p_name}", border=False):
-                fc1, fc2, fc3, fc4 = st.columns([1.5, 2, 2, 1])
-                with fc1:
-                    price = st.number_input("单价(¥)", min_value=0.0, step=0.1, key=f"p_{p_name}")
-                with fc2:
-                    remark = st.text_input("备注", placeholder="选填", key=f"r_{p_name}")
-                with fc3:
-                    file_up = st.file_uploader("报价附件", key=f"f_{p_name}")
-                with fc4:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    sub_btn = st.form_submit_button("提交报价", disabled=is_closed, use_container_width=True, type="primary")
-
-                if sub_btn:
-                    if is_closed: st.error("已截止")
-                    elif price <= 0: st.error("价格需大于0")
-                    else:
-                        f_data = file_to_base64(file_up)
-                        new_bid = {
-                            "supplier": supplier_name, "price": price, "remark": remark,
-                            "file": f_data, "time": now.strftime("%H:%M:%S"), "datetime": now
-                        }
-                        if "bids" not in p_info: p_info["bids"] = []
-                        p_info["bids"].append(new_bid)
-                        st.success("✅ 提交成功")
-                        st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-# --- 管理员端页面 ---
-def render_admin_dashboard():
-    with st.sidebar:
-        st.markdown("### 👮‍♂️ 管理员控制台")
-        menu = st.radio("导航", ["项目管理", "供应商库", "监控中心"], label_visibility="collapsed")
-        st.markdown("---")
-        if st.button("🚪 退出系统", use_container_width=True):
-            st.session_state.clear(); st.rerun()
-
-    # ================= 项目管理 =================
-    if menu == "项目管理":
-        st.subheader("📁 项目管理")
+    function init() {
+        scene = new THREE.Scene(); scene.background = new THREE.Color(0xeef2f3);
+        const v = document.getElementById('viewport');
+        camera = new THREE.PerspectiveCamera(45, v.clientWidth/v.clientHeight, 1, 10000);
+        camera.position.set(600, 800, 600);
+        renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer: true});
+        renderer.setSize(v.clientWidth, v.clientHeight);
+        v.appendChild(renderer.domElement);
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
         
-        # 新建项目
-        with st.expander("➕ 创建新询价项目", expanded=False):
-            with st.form("new_proj"):
-                c1, c2, c3 = st.columns([2, 1, 1])
-                p_name = c1.text_input("项目名称")
-                p_date = c2.date_input("截止日期")
-                p_time = c3.time_input("截止时间", value=datetime.strptime("17:00", "%H:%M").time())
-                all_sups = list(global_data["suppliers"].keys())
-                sel_sups = st.multiselect("选择参与供应商", all_sups)
-                
-                if st.form_submit_button("立即创建", type="primary"):
-                    if not p_name or not sel_sups:
-                        st.error("信息不完整")
-                    else:
-                        pid = str(uuid.uuid4())[:8]
-                        codes = {s: generate_random_code() for s in sel_sups}
-                        global_data["projects"][pid] = {
-                            "name": p_name,
-                            "deadline": f"{p_date} {p_time.strftime('%H:%M')}",
-                            "codes": codes,
-                            "products": {}
-                        }
-                        st.success("创建成功"); st.rerun()
-
-        # 项目列表
-        if not global_data["projects"]:
-            st.info("暂无项目")
-        else:
-            sorted_projs = sorted(global_data["projects"].items(), key=lambda x: x[1]["deadline"], reverse=True)
-            
-            for pid, pdata in sorted_projs:
-                with st.expander(f"📅 {pdata['deadline']} | {pdata['name']}", expanded=False):
-                    
-                    # 1. 供应商管理
-                    st.markdown("#### 🔑 供应商授权")
-                    st.info("💡 鼠标悬停在账号/密码上，点击右上角图标复制")
-                    codes = pdata.get("codes", {})
-                    if codes:
-                        st.markdown('<div class="ui-card">', unsafe_allow_html=True)
-                        h1, h2, h3, h4 = st.columns([1.5, 2, 2, 1])
-                        h1.markdown("**供应商**"); h2.markdown("**账号**"); h3.markdown("**密码**"); h4.markdown("**操作**")
-                        st.markdown("<hr style='margin:5px 0'>", unsafe_allow_html=True)
-                        for s_name, s_code in codes.items():
-                            r1, r2, r3, r4 = st.columns([1.5, 2, 2, 1])
-                            with r1: st.markdown(f"<div style='margin-top:5px'>{s_name}</div>", unsafe_allow_html=True)
-                            with r2: st.code(s_name, language=None)
-                            with r3: st.code(s_code, language=None)
-                            with r4: 
-                                if st.button("移除", key=f"rm_{pid}_{s_name}"):
-                                    del pdata["codes"][s_name]; st.rerun()
-                        # 追加供应商
-                        st.markdown("<hr style='margin:10px 0'>", unsafe_allow_html=True)
-                        ac1, ac2 = st.columns([3, 1])
-                        new_sup = ac1.text_input("追加供应商", key=f"add_{pid}", label_visibility="collapsed", placeholder="输入名称")
-                        if ac2.button("追加", key=f"btn_{pid}"):
-                            if new_sup and new_sup not in codes:
-                                pdata["codes"][new_sup] = generate_random_code()
-                                if new_sup not in global_data["suppliers"]: global_data["suppliers"][new_sup] = {}
-                                st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-
-                    # 2. 产品管理（核心修改：增加甲方上传附件）
-                    st.markdown("#### 📦 询价产品列表")
-                    prods = pdata.get("products", {})
-                    
-                    # --- 添加产品表单 ---
-                    with st.form(f"add_p_{pid}", border=True):
-                        st.caption("添加新产品")
-                        # 调整列布局以容纳文件上传
-                        c1, c2, c3, c4, c5 = st.columns([2, 1, 2, 2, 1])
-                        pn = c1.text_input("产品名", placeholder="如：光缆接头盒")
-                        pq = c2.number_input("数量", min_value=1, value=1)
-                        pd_ = c3.text_input("描述", placeholder="规格型号")
-                        # 新增：上传控件
-                        pf_up = c4.file_uploader("规格书/图纸", key=f"up_spec_{pid}")
-                        
-                        sub_new_prod = c5.form_submit_button("添加", use_container_width=True, type="primary")
-                        
-                        if sub_new_prod and pn:
-                            # 处理甲方上传的文件
-                            admin_file_data = file_to_base64(pf_up)
-                            pdata["products"][pn] = {
-                                "quantity": pq, 
-                                "desc": pd_, 
-                                "bids": [],
-                                "admin_file": admin_file_data # 存储文件
-                            }
-                            st.rerun()
-                    # -------------------
-                    
-                    if prods:
-                        st.markdown('<div class="ui-card">', unsafe_allow_html=True)
-                        for pdn, pdi in prods.items():
-                            c1, c2 = st.columns([6, 1])
-                            # 显示产品信息，如果有附件显示标记
-                            desc_text = f" - {pdi.get('desc')}" if pdi.get('desc') else ""
-                            file_icon = "📎(含附件)" if pdi.get("admin_file") else ""
-                            
-                            c1.markdown(f"• **{pdn}** (x{pdi['quantity']}){desc_text}  <span style='color:#3b82f6; font-size:0.8em'>{file_icon}</span>", unsafe_allow_html=True)
-                            
-                            if c2.button("删除", key=f"del_p_{pid}_{pdn}"):
-                                del pdata["products"][pdn]; st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    if st.button("🗑️ 删除整个项目", key=f"del_proj_{pid}"):
-                        del global_data["projects"][pid]; st.rerun()
-
-    # ================= 供应商库 =================
-    elif menu == "供应商库":
-        st.subheader("🏢 供应商数据库")
-        df = pd.DataFrame.from_dict(global_data["suppliers"], orient='index')
-        if df.empty: df = pd.DataFrame(columns=["contact", "phone", "job", "type", "address"])
-        df.columns = ["联系人", "电话", "职位", "产品类型", "地址"]
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const l = new THREE.DirectionalLight(0xffffff, 0.5); l.position.set(1,1,1); scene.add(l);
         
-        with st.container():
-            st.markdown('<div class="ui-card">', unsafe_allow_html=True)
-            edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="sup_editor")
-            if st.button("💾 保存更改", type="primary"):
-                new_dict = {}
-                for idx, row in edited_df.iterrows():
-                    new_dict[idx] = {
-                        "contact": row.get("联系人",""), "phone": row.get("电话",""),
-                        "job": row.get("职位",""), "type": row.get("产品类型",""), "address": row.get("地址","")
+        boxGroup = new THREE.Group(); itemsGroup = new THREE.Group();
+        scene.add(boxGroup, itemsGroup);
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = v.clientWidth/v.clientHeight; camera.updateProjectionMatrix();
+            renderer.setSize(v.clientWidth, v.clientHeight);
+        });
+        runMaxRectsEngine(); animate();
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const target = isOpen ? Math.PI*0.8 : 0;
+        flaps.forEach(f => {
+            f.ang += (target - f.ang) * 0.1;
+            if(f.ax==='x') f.pivot.rotation.x = f.ang * f.dir;
+        });
+
+        if(isAnimating) {
+            if(animIndex < animQueue.length) {
+                for(let i=0; i<2; i++) { // 每帧放两个，加速
+                    if(animIndex < animQueue.length) {
+                        animQueue[animIndex].visible = true; animIndex++;
                     }
-                global_data["suppliers"] = new_dict
-                st.success("已保存"); st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+                }
+            }
+            let active = false;
+            animQueue.forEach(m => {
+                if(m.visible && !m.userData.settled) {
+                    if(m.position.y > m.userData.finalY + 1) {
+                        m.position.y += (m.userData.finalY - m.position.y) * 0.2;
+                        active = true;
+                    } else {
+                        m.position.y = m.userData.finalY; m.userData.settled = true;
+                    }
+                }
+            });
+            if(animIndex === animQueue.length && !active) isAnimating = false;
+        }
 
-    # ================= 监控中心 =================
-    elif menu == "监控中心":
-        st.subheader("📊 报价分析看板")
-        proj_opts = {pid: f"{d['deadline']} | {d['name']}" for pid, d in global_data["projects"].items()}
-        sel_pid = st.selectbox("选择项目", options=list(proj_opts.keys()), format_func=lambda x: proj_opts[x])
-        
-        if sel_pid:
-            pdata = global_data["projects"][sel_pid]
-            products = pdata.get("products", {})
-            
-            # 汇总
-            summary = []
-            for pn, pinfo in products.items():
-                bids = [b for b in pinfo.get("bids", []) if b["price"] > 0]
-                if bids:
-                    prices = [b["price"] for b in bids]
-                    min_p = min(prices)
-                    best_sups = ",".join(set([b["supplier"] for b in bids if b["price"] == min_p]))
-                    summary.append({
-                        "产品": pn, "数量": pinfo["quantity"], "最低单价": min_p, 
-                        "最低总价": min_p * pinfo["quantity"], "推荐供应商": best_sups, "报价数": len(bids)
-                    })
-                else:
-                    summary.append({"产品": pn, "数量": pinfo["quantity"], "报价数": 0})
-            
-            st.markdown('<div class="ui-card">', unsafe_allow_html=True)
-            st.markdown("#### 🏆 比价汇总")
-            st.dataframe(pd.DataFrame(summary), use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # 详细
-            st.markdown("#### 📈 报价明细与附件")
-            for pn, pinfo in products.items():
-                bids = pinfo.get("bids", [])
-                if bids:
-                    st.markdown(f"**📦 {pn}**")
-                    st.bar_chart(pd.DataFrame(bids), x="supplier", y="price", color="#3b82f6")
-                    
-                    st.markdown("<small style='color:#666'>详细报价列表：</small>", unsafe_allow_html=True)
-                    cols = st.columns([2, 2, 3, 2, 2])
-                    cols[0].markdown("**供应商**"); cols[1].markdown("**单价**"); cols[2].markdown("**备注**")
-                    cols[3].markdown("**时间**"); cols[4].markdown("**附件**")
-                    st.divider()
-                    for bid in bids:
-                        c1, c2, c3, c4, c5 = st.columns([2, 2, 3, 2, 2])
-                        c1.caption(bid["supplier"])
-                        c2.caption(f"¥{bid['price']}")
-                        c3.caption(bid.get("remark", "-"))
-                        c4.caption(bid.get("time", "-"))
-                        with c5:
-                            if bid.get("file"): st.markdown(get_styled_download_tag(bid["file"]), unsafe_allow_html=True)
-                            else: st.caption("无")
-                    st.markdown("<br>", unsafe_allow_html=True)
+        controls.update(); renderer.render(scene, camera);
+    }
+    init();
+</script>
+</body>
+</html>
+"""
 
-# --- 主程序入口 ---
-def main():
-    if "user" not in st.session_state: render_login_page()
-    else:
-        u_type = st.session_state.get("user_type")
-        if u_type == "admin": render_admin_dashboard()
-        elif u_type == "supplier": render_supplier_dashboard()
-        else: st.session_state.clear(); st.rerun()
-
-if __name__ == "__main__":
-    main()
+components.html(html_code, height=1200, scrolling=False)
